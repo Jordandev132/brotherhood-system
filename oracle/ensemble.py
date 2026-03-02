@@ -479,7 +479,7 @@ def _query_claude(cfg: OracleConfig, system: str, user: str) -> dict | None:
             "https://api.anthropic.com/v1/messages",
             headers={
                 "x-api-key": cfg.claude_api_key,
-                "anthropic-version": "2025-01-01",
+                "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
             json={
