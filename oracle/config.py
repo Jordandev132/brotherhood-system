@@ -73,7 +73,7 @@ class OracleConfig:
 
     # --- Scheduling ---
     cycle_interval_hours: int = 4   # scan every 4 hours (6x/day)
-    daily_max_new_trades: int = 3   # max NEW trades per day (across all scans)
+    daily_max_new_trades: int = 6   # max NEW trades per day (across all scans)
     emergency_volatility_pct: float = 0.08  # 8% BTC move triggers emergency re-scan
 
     def status_path(self) -> Path:

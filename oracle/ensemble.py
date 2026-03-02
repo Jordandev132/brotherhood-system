@@ -516,15 +516,14 @@ def _query_gemini(cfg: OracleConfig, system: str, user: str) -> dict | None:
                 json={
                     "system_instruction": {"parts": [{"text": system}]},
                     "contents": [{"parts": [{"text": user}]}],
-                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2000},
+                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096, "responseMimeType": "application/json"},
                 },
-                timeout=60,
+                timeout=90,
             )
             if resp.status_code == 200:
                 data = resp.json()
                 candidates = data.get("candidates", [])
                 if not candidates:
-                    # Safety filter or empty response
                     block_reason = data.get("promptFeedback", {}).get("blockReason", "unknown")
                     log.warning("Gemini %s returned no candidates (block_reason=%s)", model, block_reason)
                     continue
@@ -532,6 +531,8 @@ def _query_gemini(cfg: OracleConfig, system: str, user: str) -> dict | None:
                 if finish_reason == "SAFETY":
                     log.warning("Gemini %s blocked by safety filter (finishReason=SAFETY)", model)
                     continue
+                if finish_reason == "MAX_TOKENS":
+                    log.warning("Gemini %s output truncated (MAX_TOKENS)", model)
                 text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                 if not text:
                     log.warning("Gemini %s returned empty text, full response: %s", model, json.dumps(data)[:500])
@@ -540,7 +541,7 @@ def _query_gemini(cfg: OracleConfig, system: str, user: str) -> dict | None:
                 if parsed:
                     log.info("Gemini %s returned valid predictions", model)
                     return parsed
-                log.warning("Gemini %s returned unparseable text: %s", model, text[:300])
+                log.warning("Gemini %s returned unparseable text (finishReason=%s): %s", model, finish_reason, text[:300])
             elif resp.status_code == 404:
                 log.warning("Gemini model %s not found (404), trying fallback", model)
                 continue
