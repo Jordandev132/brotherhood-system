@@ -124,23 +124,36 @@ def smart_kelly_size(
 def _get_market_price(market: HawkMarket, outcome: str = "yes") -> float:
     """Get current market price for a given outcome (handles Yes/No/Over/Under)."""
     target = _YES_OUTCOMES if outcome == "yes" else _NO_OUTCOMES
-    for t in market.tokens:
-        tok_outcome = (t.get("outcome") or "").lower()
+    tokens = getattr(market, "tokens", []) or []
+
+    # First pass: match explicit outcome strings (yes/no/over/under/up/down)
+    for t in tokens:
+        try:
+            tok_outcome = (t.get("outcome") or "").lower()
+        except Exception:
+            tok_outcome = ""
         if tok_outcome in target:
             try:
                 return float(t.get("price", 0.5))
             except (ValueError, TypeError):
-                return 0.5
-    # Fallback: first token = "yes" equivalent, second = "no" equivalent
-    tokens = market.tokens
-    if len(tokens) == 2:
+                # malformed price for this token, try next candidate
+                continue
+
+    # Fallback: interpret first token as YES-equivalent, second as NO-equivalent
+    if len(tokens) >= 2:
         idx = 0 if outcome == "yes" else 1
         try:
             return float(tokens[idx].get("price", 0.5))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             return 0.5
-    return 0.5
+    elif len(tokens) == 1:
+        try:
+            return float(tokens[0].get("price", 0.5))
+        except (ValueError, TypeError, AttributeError):
+            return 0.5
 
+    # No tokens available — return neutral mid-price
+    return 0.5
 
 def _get_token_id(market: HawkMarket, outcome: str = "yes") -> str:
     """Get the token_id for a given outcome (handles Yes/No/Over/Under + team names)."""
