@@ -61,13 +61,13 @@ class HawkTracker:
 
     @property
     def total_exposure(self) -> float:
-        return sum(p.get("size_usd", 0) for p in self._positions
-                   if p.get("filled", True))
+        # Sum ALL unresolved positions — filled flag unreliable with V8 limit orders
+        return sum(p.get("size_usd", 0) for p in self._positions)
 
     @property
     def count(self) -> int:
-        return sum(1 for p in self._positions
-                   if p.get("filled", True) and not p.get("resolved", False))
+        # Count ALL unresolved positions — filled flag unreliable with V8 limit orders
+        return len(self._positions)
 
     def has_position_for_market(self, condition_id: str, question: str = "") -> bool:
         """Check by condition_id + question similarity (blocks near-duplicate bets)."""
