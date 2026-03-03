@@ -170,6 +170,19 @@ def main() -> None:
     log.info("Threshold:  %.4f%%", cfg.direction_threshold * 100)
     log.info("Entry:      %.0f¢ - %.0f¢", cfg.entry_price_min * 100, cfg.entry_price_max * 100)
     log.info("Tick:       %.1fs | Scan: %.0fs", cfg.tick_interval_s, cfg.scan_interval_s)
+    if cfg.momentum_enabled:
+        log.info("Momentum:   ENABLED (T+%ds to T+%ds)", cfg.momentum_entry_start_s, cfg.momentum_entry_end_s)
+        log.info("Mom entry:  %.0f¢ - %.0f¢", cfg.momentum_entry_price_min * 100, cfg.momentum_entry_price_max * 100)
+        log.info("Mom bet:    $%.0f", cfg.momentum_max_bet_usd)
+        log.info("Mom signals: %d required", cfg.momentum_min_signals)
+    else:
+        log.info("Momentum:   DISABLED")
+    if cfg.spread_enabled:
+        log.info("Spread:     ENABLED (T+%ds to T+%ds)", cfg.spread_entry_start_s, cfg.spread_entry_end_s)
+        log.info("Spr max:    combined < %.0f¢", cfg.spread_max_combined_cost * 100)
+        log.info("Spr bet:    $%.0f ($%.0f/side)", cfg.spread_max_bet_usd, cfg.spread_max_bet_usd / 2)
+    else:
+        log.info("Spread:     DISABLED")
     log.info("=" * 60)
 
     # Safety gate: live mode requires separate wallet
@@ -224,7 +237,8 @@ def main() -> None:
     window_tracker = WindowTracker(bot_cfg, price_cache)
     tracker = PaperTracker()
     engine = KillshotEngine(cfg, price_cache, tracker, clob_client=clob_client,
-                            chainlink_ws=chainlink_ws, clob_ws=clob_ws)
+                            chainlink_ws=chainlink_ws, clob_ws=clob_ws,
+                            binance_feed=binance_feed)
 
     # Start Binance WebSocket feed (runs in daemon threads)
     loop = asyncio.new_event_loop()
@@ -284,7 +298,7 @@ def main() -> None:
             engine.tick(window_tracker.all_active_windows())
 
             # Resolve completed paper trades
-            resolved = tracker.resolve_trades(price_cache)
+            resolved = tracker.resolve_trades(price_cache, clob_ws=clob_ws)
             if resolved:
                 engine.report_resolved(resolved)
 

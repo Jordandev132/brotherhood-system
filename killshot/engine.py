@@ -1,15 +1,17 @@
-"""Killshot engine — late-window direction snipe using Chainlink oracle.
+"""Killshot engine — late-window heavy-side snipe using Chainlink oracle.
 
-Core logic:
-1. Throughout kill zone (T-120s to T-5s), monitor price + CLOB book
-2. If delta exceeds threshold AND book is 25-95¢ → buy the winning side
-3. If book out of range, retry every 5s (DON'T blacklist the window)
+Core logic (whale strategy):
+1. Throughout kill zone, monitor spot price delta + BOTH tokens' CLOB books
+2. Pick heavy side (whichever token ≥ 60¢) — confirmed by direction signal
+3. If heavy side and direction disagree → skip (market confused)
 """
 from __future__ import annotations
 
 import json
 import logging
 import time
+
+import httpx
 
 from killshot.config import KillshotConfig
 from killshot.chainlink_ws import ChainlinkWS
@@ -28,14 +30,17 @@ class KillshotEngine:
     def __init__(self, cfg: KillshotConfig, price_cache: PriceCache,
                  tracker: PaperTracker, clob_client=None,
                  chainlink_ws: ChainlinkWS | None = None,
-                 clob_ws=None):
+                 clob_ws=None, binance_feed=None):
         self._cfg = cfg
         self._cache = price_cache
         self._tracker = tracker
         self._client = clob_client
         self._chainlink = chainlink_ws
         self._clob_ws = clob_ws
+        self._binance_feed = binance_feed
         self._dry_run = cfg.dry_run
+        self._rust_url = cfg.rust_executor_url.rstrip("/") if cfg.rust_executor_url else ""
+        self._rust_http = httpx.Client(timeout=5.0) if self._rust_url else None
         # market_id -> timestamp when ACTUALLY traded (permanent blacklist)
         self._traded_windows: dict[str, float] = {}
         # market_id -> timestamp of last skip (5s cooldown before retry)
@@ -43,6 +48,11 @@ class KillshotEngine:
         self._daily_loss: float = 0.0
         self._daily_reset_date: str = ""
         self._kill_zone_logged: set[str] = set()
+        # Momentum state
+        self._momentum_logged: set[str] = set()
+        self._pending_limit_orders: dict[str, dict] = {}  # market_id -> order info
+        # Spread state
+        self._spread_logged: set[str] = set()
 
     def tick(self, windows: list[Window]) -> None:
         """Called every tick (default 0.1s) — check all active windows for kill zone entry."""
@@ -54,12 +64,17 @@ class KillshotEngine:
             self._daily_loss = 0.0
             self._daily_reset_date = today
             self._kill_zone_logged.clear()
+            self._momentum_logged.clear()
+            self._spread_logged.clear()
             self._skip_cooldown.clear()
             log.info("[KILLSHOT] Daily reset — loss counter cleared")
 
         # Daily loss cap
         if self._daily_loss >= self._cfg.daily_loss_cap_usd:
             return
+
+        # Check/cancel expired GTC limit orders
+        self._check_pending_limit_orders(now)
 
         for window in windows:
             # Already traded this window — permanent skip
@@ -68,10 +83,27 @@ class KillshotEngine:
             if window.asset not in self._cfg.assets:
                 continue
 
+            elapsed = now - window.start_ts
             remaining = window.end_ts - now
 
-            # Kill zone: between min_window_seconds and window_seconds before close
-            if remaining > self._cfg.window_seconds or remaining < self._cfg.min_window_seconds:
+            # ── SPREAD ZONE (T+15s to T+60s) — PRIMARY ──
+            cfg = self._cfg
+            if (cfg.spread_enabled
+                    and cfg.spread_entry_start_s <= elapsed <= cfg.spread_entry_end_s
+                    and window.market_id not in self._pending_limit_orders):
+                fired = self._evaluate_spread(window, elapsed)
+                if fired:
+                    continue  # Spread placed — skip momentum AND kill zone
+
+            # ── MOMENTUM ZONE (T+30s to T+60s) — FALLBACK 1 ──
+            if (cfg.momentum_enabled
+                    and cfg.momentum_entry_start_s <= elapsed <= cfg.momentum_entry_end_s
+                    and window.market_id not in self._pending_limit_orders):
+                self._evaluate_momentum(window, elapsed)
+                continue  # skip kill zone during momentum window
+
+            # ── KILL ZONE (T-35s to T-0s) — FALLBACK 2 ──
+            if remaining > cfg.window_seconds or remaining < cfg.min_window_seconds:
                 continue
 
             # Skip cooldown: retry every 1s (was 5s with REST, reduced since WS is instant)
@@ -113,15 +145,27 @@ class KillshotEngine:
 
         return None, float("inf"), ""
 
+    def _get_book(self, token_id: str | None) -> tuple[dict | None, str]:
+        """Fetch orderbook for a token. Returns (book, source)."""
+        if not token_id:
+            return None, "none"
+        if self._clob_ws:
+            book = self._clob_ws.get_book(token_id)
+            if book:
+                return book, "WS"
+        book = clob_book.get_orderbook(token_id)
+        if book:
+            return book, "REST"
+        return None, "none"
+
     def _evaluate_window(self, window: Window, remaining: float) -> None:
-        """Evaluate a single window for trading opportunity.
+        """Evaluate a single window — whale strategy: buy the heavy side.
 
-        Trades when:
-        1. Price delta exceeds threshold (direction signal)
-        2. Book price is 25-95¢ (not a gamble, not fully priced in)
-
-        If book is out of range → set 5s cooldown and retry.
-        Does NOT permanently blacklist skipped windows.
+        1. Check spot delta for direction signal
+        2. Fetch BOTH tokens' books
+        3. Pick heavy side (highest book price, must be ≥ 60¢)
+        4. Confirm: direction must agree with heavy side
+        5. Fire if everything lines up
         """
         current_price, price_age, price_source = self._get_best_price(window.asset)
 
@@ -136,62 +180,73 @@ class KillshotEngine:
         # Delta since window opened
         delta = (current_price - window.open_price) / window.open_price
 
-        # Direction must clear threshold
+        # Direction must clear threshold (low bar — whale trades on tiny moves)
         if abs(delta) < self._cfg.direction_threshold:
             self._skip_cooldown[window.market_id] = time.time()
             return
 
         direction = "up" if delta > 0 else "down"
 
-        # Fetch CLOB book for the winning side (WS instant, REST fallback)
-        winning_token = window.up_token_id if direction == "up" else window.down_token_id
-        book = None
-        book_src = "none"
-        if winning_token and self._clob_ws:
-            book = self._clob_ws.get_book(winning_token)
-            if book:
-                book_src = "WS"
-        if book is None:
-            book = clob_book.get_orderbook(winning_token) if winning_token else None
-            if book:
-                book_src = "REST"
-                log.debug(
-                    "[KILLSHOT] WS miss → REST fallback for %s...",
-                    winning_token[:16] if winning_token else "?",
-                )
-        market_bid = book["best_bid"] if book and book["best_bid"] > 0 else None
-        market_ask = book["best_ask"] if book and book["best_ask"] > 0 else None
+        # ── Fetch BOTH tokens' books ──
+        up_book, up_src = self._get_book(window.up_token_id)
+        down_book, down_src = self._get_book(window.down_token_id)
 
-        book_price = market_ask if market_ask and market_ask > 0 else market_bid
+        up_ask = up_book["best_ask"] if up_book and up_book.get("best_ask", 0) > 0 else None
+        up_bid = up_book["best_bid"] if up_book and up_book.get("best_bid", 0) > 0 else None
+        down_ask = down_book["best_ask"] if down_book and down_book.get("best_ask", 0) > 0 else None
+        down_bid = down_book["best_bid"] if down_book and down_book.get("best_bid", 0) > 0 else None
 
-        # Floor only: 25¢ minimum (no gambling on near-zero tokens)
-        # NO ceiling — whale pays 90-95¢ and wins 98%. Trust direction at T-20s.
-        if not book_price or book_price < 0.25:
-            # DON'T blacklist — set cooldown and retry in 5s
+        up_price = up_ask or up_bid or 0.0
+        down_price = down_ask or down_bid or 0.0
+
+        # ── Pick heavy side ──
+        if up_price >= down_price:
+            heavy_side = "up"
+            heavy_price = up_price
+            heavy_token = window.up_token_id
+            heavy_ask = up_ask
+            book_src = up_src
+        else:
+            heavy_side = "down"
+            heavy_price = down_price
+            heavy_token = window.down_token_id
+            heavy_ask = down_ask
+            book_src = down_src
+
+        # Heavy side must be ≥ 90¢ (high confidence only — zero losses above 85¢)
+        if heavy_price < 0.90:
             self._skip_cooldown[window.market_id] = time.time()
-            log.debug(
-                "[KILLSHOT] %s %s T-%.0fs | book=%s — retry in 5s",
-                direction.upper(), window.asset.upper(), remaining,
-                f"{book_price*100:.0f}¢" if book_price else "none",
+            return
+
+        # ── Direction must CONFIRM heavy side ──
+        # If BTC went up, heavy side should be UP token. If they disagree, market is confused → skip.
+        if direction != heavy_side:
+            self._skip_cooldown[window.market_id] = time.time()
+            log.info(
+                "[KILLSHOT] %s T-%.0fs | direction=%s but heavy=%s (%.0f¢) — conflict, skip",
+                window.asset.upper(), remaining, direction.upper(),
+                heavy_side.upper(), heavy_price * 100,
             )
             return
 
         # ── FIRE ──
+        market_bid = up_bid if heavy_side == "up" else down_bid
+        market_ask = heavy_ask
         size_usd = self._cfg.max_bet_usd
 
         # Mark window as traded — permanent, no retry
         self._traded_windows[window.market_id] = time.time()
 
         # Live or paper
-        if not self._dry_run and self._client and winning_token:
+        if not self._dry_run and self._client and heavy_token:
             entry_price, actual_shares, order_id = self._place_live_order(
-                winning_token, market_ask, size_usd,
+                heavy_token, market_ask, size_usd,
             )
             if entry_price is None:
                 log.warning("[KILLSHOT] Live order FAILED — no fill")
                 return
         else:
-            entry_price = round(book_price, 2)
+            entry_price = round(heavy_price, 2)
             actual_shares = round(size_usd / entry_price, 2)
             order_id = ""
 
@@ -211,44 +266,733 @@ class KillshotEngine:
             open_price=window.open_price,
             market_bid=market_bid or 0.0,
             market_ask=market_ask or 0.0,
+            token_id=heavy_token or "",
         )
         self._tracker.record_trade(trade)
 
         log.info(
-            "[KILLSHOT] %s FIRE: %s %s | delta=%.3f%% | entry=%.0f¢ | "
+            "[KILLSHOT] %s FIRE: %s %s | heavy=%s %.0f¢ | delta=%.3f%% | entry=%.0f¢ | "
             "$%.2f (%.1f shares) | T-%.0fs | price=%s book=%s%s",
-            mode, direction.upper(), window.asset.upper(), delta * 100,
+            mode, direction.upper(), window.asset.upper(),
+            heavy_side.upper(), heavy_price * 100, delta * 100,
             entry_price * 100, size_usd, actual_shares, remaining,
             price_source, book_src,
             f" | order={order_id}" if order_id else "",
         )
+
+    # ── Spread capture (both-sides) methods ─────────────────────
+
+    def _evaluate_spread(self, window: Window, elapsed: float) -> bool:
+        """Evaluate a window for spread capture (buy BOTH sides for guaranteed profit).
+
+        Returns True if spread orders were placed/simulated, False if skipped.
+        """
+        cfg = self._cfg
+
+        # Log spread zone entry (once per window)
+        if window.market_id not in self._spread_logged:
+            self._spread_logged.add(window.market_id)
+            log.info(
+                "[KILLSHOT] Spread zone: %s %s | T+%.0fs | open=$%.2f",
+                window.asset.upper(), window.market_id[:12], elapsed, window.open_price,
+            )
+
+        # Fetch BOTH books
+        up_book, up_src = self._get_book(window.up_token_id)
+        down_book, down_src = self._get_book(window.down_token_id)
+
+        up_ask = up_book["best_ask"] if up_book and up_book.get("best_ask", 0) > 0 else None
+        down_ask = down_book["best_ask"] if down_book and down_book.get("best_ask", 0) > 0 else None
+
+        if up_ask is None or down_ask is None:
+            return False
+
+        combined = up_ask + down_ask
+        if combined >= cfg.spread_max_combined_cost:
+            return False  # Spread too tight — no guaranteed profit margin
+
+        guaranteed_profit_pct = (1.0 - combined) * 100
+        log.info(
+            "[KILLSHOT] Spread found: %s UP@%.0f¢ + DOWN@%.0f¢ = %.0f¢ | profit=%.1f¢/dollar",
+            window.asset.upper(), up_ask * 100, down_ask * 100,
+            combined * 100, guaranteed_profit_pct,
+        )
+
+        half_usd = cfg.spread_max_bet_usd / 2
+        up_shares = round(half_usd / up_ask, 2)
+        down_shares = round(half_usd / down_ask, 2)
+
+        # Mark window as traded
+        self._traded_windows[window.market_id] = time.time()
+
+        if self._dry_run:
+            # Paper mode: simulate both fills immediately
+            up_trade = PaperTrade(
+                timestamp=time.time(),
+                asset=window.asset,
+                market_id=window.market_id,
+                question=window.question,
+                direction="up",
+                entry_price=round(up_ask, 2),
+                size_usd=round(half_usd, 2),
+                shares=up_shares,
+                window_end_ts=window.end_ts,
+                spot_delta_pct=0.0,
+                open_price=window.open_price,
+                market_ask=up_ask,
+                token_id=window.up_token_id or "",
+            )
+            down_trade = PaperTrade(
+                timestamp=time.time() + 0.001,  # offset to avoid JSONL collision
+                asset=window.asset,
+                market_id=window.market_id,
+                question=window.question,
+                direction="down",
+                entry_price=round(down_ask, 2),
+                size_usd=round(half_usd, 2),
+                shares=down_shares,
+                window_end_ts=window.end_ts,
+                spot_delta_pct=0.0,
+                open_price=window.open_price,
+                market_ask=down_ask,
+                token_id=window.down_token_id or "",
+            )
+            self._tracker.record_trade(up_trade, strategy="spread")
+            self._tracker.record_trade(down_trade, strategy="spread")
+
+            log.info(
+                "[KILLSHOT] PAPER SPREAD: %s | UP %.0f¢ (%.1f sh) + DOWN %.0f¢ (%.1f sh) | "
+                "$%.2f total | guaranteed %.1f¢",
+                window.asset.upper(), up_ask * 100, up_shares,
+                down_ask * 100, down_shares,
+                cfg.spread_max_bet_usd, guaranteed_profit_pct,
+            )
+            return True
+
+        # Live mode: place two GTC orders
+        return self._place_spread_orders(window, up_ask, down_ask, half_usd,
+                                         up_shares, down_shares)
+
+    def _place_spread_orders(
+        self, window: Window, up_ask: float, down_ask: float,
+        half_usd: float, up_shares: float, down_shares: float,
+    ) -> bool:
+        """Place two GTC maker orders (buy up token + buy down token).
+
+        If only one leg places successfully, cancel it (orphan cleanup).
+        """
+        up_oid = None
+        down_oid = None
+
+        # ── Place UP leg ──
+        up_oid = self._place_gtc_leg(window.up_token_id, up_ask, up_shares, "UP")
+
+        # ── Place DOWN leg ──
+        down_oid = self._place_gtc_leg(window.down_token_id, down_ask, down_shares, "DOWN")
+
+        # ── Orphan cleanup ──
+        if up_oid and down_oid:
+            self._pending_limit_orders[window.market_id] = {
+                "type": "spread",
+                "up_order_id": up_oid,
+                "down_order_id": down_oid,
+                "up_token_id": window.up_token_id,
+                "down_token_id": window.down_token_id,
+                "up_price": up_ask,
+                "down_price": down_ask,
+                "up_shares": up_shares,
+                "down_shares": down_shares,
+                "size_usd": self._cfg.spread_max_bet_usd,
+                "placed_at": time.time(),
+                "window": window,
+            }
+            log.info(
+                "[KILLSHOT] Spread GTC placed: UP=%s DOWN=%s",
+                up_oid[:12], down_oid[:12],
+            )
+            return True
+
+        # One or both failed — cancel the successful one
+        if up_oid and not down_oid:
+            self._cancel_order(up_oid)
+            log.warning("[KILLSHOT] Spread orphan: cancelling UP leg %s (DOWN failed)", up_oid[:12])
+        elif down_oid and not up_oid:
+            self._cancel_order(down_oid)
+            log.warning("[KILLSHOT] Spread orphan: cancelling DOWN leg %s (UP failed)", down_oid[:12])
+
+        # Reopen window for other strategies
+        self._traded_windows.pop(window.market_id, None)
+        return False
+
+    def _place_gtc_leg(self, token_id: str | None, price: float, shares: float, label: str) -> str | None:
+        """Place a single GTC leg. Returns order_id or None on failure."""
+        if not token_id:
+            return None
+        if shares < 5:
+            shares = 5.0
+
+        # Try Rust executor
+        if self._rust_http and self._rust_url:
+            try:
+                resp = self._rust_http.post(
+                    f"{self._rust_url}/order",
+                    json={
+                        "token_id": token_id,
+                        "price": price,
+                        "size": shares,
+                        "side": "BUY",
+                        "order_type": "GTC",
+                        "neg_risk": True,
+                    },
+                )
+                data = resp.json()
+                if data.get("success"):
+                    return data.get("order_id", "unknown")
+            except Exception as e:
+                log.warning("[KILLSHOT] Spread %s Rust GTC failed: %s", label, str(e)[:80])
+
+        # Python fallback
+        if not self._client:
+            return None
+        try:
+            from py_clob_client.clob_types import OrderArgs, OrderType
+            from py_clob_client.order_builder.constants import BUY
+
+            order_args = OrderArgs(price=price, size=shares, side=BUY, token_id=token_id)
+            signed_order = self._client.create_order(order_args)
+            resp = self._client.post_order(signed_order, OrderType.GTC)
+            return resp.get("orderID") or resp.get("id")
+        except Exception as e:
+            log.error("[KILLSHOT] Spread %s GTC error: %s", label, str(e)[:150])
+            return None
+
+    # ── Momentum (early-entry) methods ─────────────────────────
+
+    def _evaluate_momentum(self, window: Window, elapsed: float) -> None:
+        """Evaluate a window for early momentum entry (T+30s to T+60s).
+
+        3-signal consensus: previous candle direction, current delta, Binance flow.
+        Need >= min_signals aligned in same direction to fire.
+        """
+        cfg = self._cfg
+        asset = window.asset
+
+        # Log momentum zone entry (once per window)
+        if window.market_id not in self._momentum_logged:
+            self._momentum_logged.add(window.market_id)
+            log.info(
+                "[KILLSHOT] Momentum zone: %s %s | T+%.0fs | open=$%.2f",
+                asset.upper(), window.market_id[:12], elapsed, window.open_price,
+            )
+
+        # ── Signal 1: Previous candle direction ──
+        prev_price = self._cache.get_price_ago(asset, 5)
+        sig1_dir = None
+        sig1_delta = 0.0
+        if prev_price and window.open_price > 0:
+            sig1_delta = (window.open_price - prev_price) / prev_price
+            if abs(sig1_delta) >= cfg.momentum_prev_candle_threshold:
+                sig1_dir = "up" if sig1_delta > 0 else "down"
+
+        # ── Signal 2: Current candle early delta ──
+        current_price, price_age, price_source = self._get_best_price(asset)
+        sig2_dir = None
+        sig2_delta = 0.0
+        if current_price and window.open_price > 0:
+            sig2_delta = (current_price - window.open_price) / window.open_price
+            if abs(sig2_delta) >= cfg.momentum_confirm_threshold:
+                sig2_dir = "up" if sig2_delta > 0 else "down"
+
+        # ── Signal 3: Binance depth flow (bid/ask imbalance as flow proxy) ──
+        sig3_dir = None
+        if self._binance_feed:
+            depth = self._binance_feed.get_depth(asset)
+            if depth:
+                bids = depth.get("bids", [])
+                asks = depth.get("asks", [])
+                bid_vol = sum(float(b[0]) * float(b[1]) for b in bids) if bids else 0
+                ask_vol = sum(float(a[0]) * float(a[1]) for a in asks) if asks else 0
+                total = bid_vol + ask_vol
+                if total > 0:
+                    imbalance = (bid_vol - ask_vol) / total
+                    if abs(imbalance) >= cfg.momentum_flow_min_strength:
+                        sig3_dir = "up" if imbalance > 0 else "down"
+
+        # ── Consensus ──
+        votes = {"up": 0, "down": 0}
+        for sig in (sig1_dir, sig2_dir, sig3_dir):
+            if sig:
+                votes[sig] += 1
+
+        # Need >= min_signals aligned
+        if votes["up"] >= cfg.momentum_min_signals:
+            direction = "up"
+            vote_count = votes["up"]
+        elif votes["down"] >= cfg.momentum_min_signals:
+            direction = "down"
+            vote_count = votes["down"]
+        else:
+            return  # No consensus
+
+        # ── Pick target token ──
+        if direction == "up":
+            target_token = window.up_token_id
+        else:
+            target_token = window.down_token_id
+
+        if not target_token:
+            return
+
+        # ── Check CLOB book for entry price ──
+        book, book_src = self._get_book(target_token)
+        if not book:
+            return
+
+        best_ask = book.get("best_ask", 0) or 0
+        if best_ask <= 0:
+            return
+
+        # Entry price must be in [entry_price_min, entry_price_max]
+        if best_ask < cfg.momentum_entry_price_min or best_ask > cfg.momentum_entry_price_max:
+            return
+
+        entry_price = round(best_ask, 2)
+        size_usd = cfg.momentum_max_bet_usd
+        shares = round(size_usd / entry_price, 2)
+        if shares < 1:
+            return
+
+        # Mark window as traded
+        self._traded_windows[window.market_id] = time.time()
+
+        # ── Execute ──
+        if not self._dry_run and self._client and target_token:
+            result = self._place_momentum_order(
+                target_token, entry_price, size_usd, window,
+            )
+            if result is None:
+                # GTC resting — don't record trade yet, wait for fill
+                log.info(
+                    "[KILLSHOT] MOMENTUM GTC resting: %s %s | %.0f¢ | $%.2f | "
+                    "signals=%d (%s/%s/%s) | T+%.0fs",
+                    direction.upper(), asset.upper(), entry_price * 100,
+                    size_usd, vote_count,
+                    sig1_dir or "-", sig2_dir or "-", sig3_dir or "-",
+                    elapsed,
+                )
+                return
+            entry_price, shares, order_id = result
+        else:
+            order_id = ""
+
+        mode = "LIVE" if not self._dry_run else "PAPER"
+        delta = sig2_delta  # Use current delta for the trade record
+
+        trade = PaperTrade(
+            timestamp=time.time(),
+            asset=asset,
+            market_id=window.market_id,
+            question=window.question,
+            direction=direction,
+            entry_price=entry_price,
+            size_usd=size_usd,
+            shares=shares,
+            window_end_ts=window.end_ts,
+            spot_delta_pct=round(delta, 6),
+            open_price=window.open_price,
+            market_bid=book.get("best_bid", 0) or 0,
+            market_ask=best_ask,
+            token_id=target_token,
+        )
+        self._tracker.record_trade(trade, strategy="momentum")
+
+        log.info(
+            "[KILLSHOT] %s MOMENTUM FIRE: %s %s | entry=%.0f¢ | $%.2f (%.1f shares) | "
+            "signals=%d (%s/%s/%s) | T+%.0fs | book=%s",
+            mode, direction.upper(), asset.upper(),
+            entry_price * 100, size_usd, shares, vote_count,
+            sig1_dir or "-", sig2_dir or "-", sig3_dir or "-",
+            elapsed, book_src,
+        )
+
+    def _place_momentum_order(
+        self, token_id: str, price: float, size_usd: float, window: Window,
+    ) -> tuple[float, float, str] | None:
+        """Place a GTC limit buy order for momentum entry.
+
+        Returns (entry_price, shares, order_id) if instantly filled.
+        Returns None if order is resting (stored in _pending_limit_orders).
+        """
+        shares = round(size_usd / price, 2)
+        if shares < 5:
+            shares = 5.0
+
+        # ── Try Rust executor (GTC) ──
+        if self._rust_http and self._rust_url:
+            try:
+                resp = self._rust_http.post(
+                    f"{self._rust_url}/order",
+                    json={
+                        "token_id": token_id,
+                        "price": price,
+                        "size": shares,
+                        "side": "BUY",
+                        "order_type": "GTC",
+                        "neg_risk": True,
+                    },
+                )
+                data = resp.json()
+                if data.get("success"):
+                    status = data.get("status", "").lower()
+                    if status in ("matched", "filled"):
+                        return (
+                            data.get("avg_price", price),
+                            data.get("total_shares", shares),
+                            data.get("order_id", "unknown"),
+                        )
+                    # Resting order
+                    order_id = data.get("order_id", "unknown")
+                    self._pending_limit_orders[window.market_id] = {
+                        "order_id": order_id,
+                        "token_id": token_id,
+                        "price": price,
+                        "shares": shares,
+                        "size_usd": size_usd,
+                        "placed_at": time.time(),
+                        "window": window,
+                    }
+                    return None
+            except Exception as e:
+                log.warning("[KILLSHOT] Rust GTC failed — falling back to Python: %s", str(e)[:100])
+
+        # ── Python fallback (GTC) ──
+        try:
+            from py_clob_client.clob_types import OrderArgs, OrderType
+            from py_clob_client.order_builder.constants import BUY
+
+            order_args = OrderArgs(
+                price=price,
+                size=shares,
+                side=BUY,
+                token_id=token_id,
+            )
+            signed_order = self._client.create_order(order_args)
+            resp = self._client.post_order(signed_order, OrderType.GTC)
+            order_id = resp.get("orderID") or resp.get("id", "unknown")
+            status = (resp.get("status") or "").lower()
+
+            log.info("[KILLSHOT] Momentum GTC response: %s", json.dumps(resp)[:500])
+
+            if status in ("matched", "filled"):
+                matches = resp.get("matchedOrders", []) or resp.get("matched_orders", [])
+                if matches:
+                    total_cost = 0.0
+                    total_shares = 0.0
+                    for m in matches:
+                        mp = float(m.get("price", price))
+                        ms = float(m.get("matchSize") or m.get("size", 0))
+                        total_cost += mp * ms
+                        total_shares += ms
+                    if total_shares > 0:
+                        return (round(total_cost / total_shares, 4), round(total_shares, 2), order_id)
+                return (price, shares, order_id)
+
+            # Resting — store for monitoring
+            self._pending_limit_orders[window.market_id] = {
+                "order_id": order_id,
+                "token_id": token_id,
+                "price": price,
+                "shares": shares,
+                "size_usd": size_usd,
+                "placed_at": time.time(),
+                "window": window,
+            }
+            return None
+
+        except Exception as e:
+            log.error("[KILLSHOT] Momentum GTC order error: %s", str(e)[:200])
+            # Remove from traded so kill zone can still try
+            self._traded_windows.pop(window.market_id, None)
+            return None
+
+    def _check_pending_limit_orders(self, now: float) -> None:
+        """Monitor pending GTC limit orders — cancel on timeout, record on fill.
+
+        Handles both momentum (single-leg) and spread (dual-leg) orders.
+        """
+        if not self._pending_limit_orders:
+            return
+
+        timeout_s = self._cfg.momentum_fill_timeout_s
+        to_remove = []
+
+        for market_id, info in self._pending_limit_orders.items():
+            age = now - info["placed_at"]
+
+            # Check fill status every ~5s (skip if checked recently)
+            last_check = info.get("last_check", 0)
+            if now - last_check < 5.0:
+                continue
+            info["last_check"] = now
+
+            if info.get("type") == "spread":
+                self._check_spread_orders(market_id, info, age, timeout_s, to_remove)
+            else:
+                self._check_momentum_order(market_id, info, age, timeout_s, to_remove)
+
+        for mid in to_remove:
+            self._pending_limit_orders.pop(mid, None)
+
+    def _check_momentum_order(self, market_id: str, info: dict,
+                              age: float, timeout_s: int, to_remove: list) -> None:
+        """Check a single-leg momentum GTC order."""
+        order_id = info["order_id"]
+
+        if age > timeout_s:
+            self._cancel_order(order_id)
+            self._traded_windows.pop(market_id, None)
+            to_remove.append(market_id)
+            log.info(
+                "[KILLSHOT] Momentum timeout: cancelling %s after %.0fs",
+                order_id[:12], age,
+            )
+            return
+
+        if self._dry_run:
+            return
+
+        filled = self._check_order_fill(order_id)
+        if filled:
+            window = info["window"]
+            trade = PaperTrade(
+                timestamp=time.time(),
+                asset=window.asset,
+                market_id=market_id,
+                question=window.question,
+                direction="up" if info["token_id"] == window.up_token_id else "down",
+                entry_price=info["price"],
+                size_usd=info["size_usd"],
+                shares=info["shares"],
+                window_end_ts=window.end_ts,
+                spot_delta_pct=0.0,
+                open_price=window.open_price,
+                token_id=info["token_id"],
+            )
+            self._tracker.record_trade(trade, strategy="momentum")
+            to_remove.append(market_id)
+            log.info(
+                "[KILLSHOT] Momentum FILLED: %s %s @ %.0f¢ | $%.2f",
+                trade.direction.upper(), window.asset.upper(),
+                info["price"] * 100, info["size_usd"],
+            )
+
+    def _check_spread_orders(self, market_id: str, info: dict,
+                             age: float, timeout_s: int, to_remove: list) -> None:
+        """Check a dual-leg spread GTC order pair."""
+        up_oid = info["up_order_id"]
+        down_oid = info["down_order_id"]
+
+        if age > timeout_s:
+            self._cancel_order(up_oid)
+            self._cancel_order(down_oid)
+            self._traded_windows.pop(market_id, None)
+            to_remove.append(market_id)
+            log.info(
+                "[KILLSHOT] Spread timeout: cancelling both legs after %.0fs", age,
+            )
+            return
+
+        if self._dry_run:
+            return
+
+        up_filled = info.get("up_filled") or self._check_order_fill(up_oid)
+        down_filled = info.get("down_filled") or self._check_order_fill(down_oid)
+
+        # Cache fill state so we don't re-check filled legs
+        if up_filled:
+            info["up_filled"] = True
+        if down_filled:
+            info["down_filled"] = True
+
+        if up_filled and down_filled:
+            # Both filled — record spread trades
+            window = info["window"]
+            up_trade = PaperTrade(
+                timestamp=time.time(),
+                asset=window.asset,
+                market_id=market_id,
+                question=window.question,
+                direction="up",
+                entry_price=info["up_price"],
+                size_usd=round(info["size_usd"] / 2, 2),
+                shares=info["up_shares"],
+                window_end_ts=window.end_ts,
+                spot_delta_pct=0.0,
+                open_price=window.open_price,
+                market_ask=info["up_price"],
+                token_id=info["up_token_id"] or "",
+            )
+            down_trade = PaperTrade(
+                timestamp=time.time() + 0.001,
+                asset=window.asset,
+                market_id=market_id,
+                question=window.question,
+                direction="down",
+                entry_price=info["down_price"],
+                size_usd=round(info["size_usd"] / 2, 2),
+                shares=info["down_shares"],
+                window_end_ts=window.end_ts,
+                spot_delta_pct=0.0,
+                open_price=window.open_price,
+                market_ask=info["down_price"],
+                token_id=info["down_token_id"] or "",
+            )
+            self._tracker.record_trade(up_trade, strategy="spread")
+            self._tracker.record_trade(down_trade, strategy="spread")
+            to_remove.append(market_id)
+            log.info(
+                "[KILLSHOT] Spread FILLED: %s UP@%.0f¢ + DOWN@%.0f¢ | $%.2f",
+                window.asset.upper(), info["up_price"] * 100,
+                info["down_price"] * 100, info["size_usd"],
+            )
+        elif (up_filled or down_filled) and age > timeout_s * 0.8:
+            # One filled, other stuck near timeout — cancel unfilled, record filled as directional
+            window = info["window"]
+            if up_filled and not down_filled:
+                self._cancel_order(down_oid)
+                trade = PaperTrade(
+                    timestamp=time.time(),
+                    asset=window.asset,
+                    market_id=market_id,
+                    question=window.question,
+                    direction="up",
+                    entry_price=info["up_price"],
+                    size_usd=round(info["size_usd"] / 2, 2),
+                    shares=info["up_shares"],
+                    window_end_ts=window.end_ts,
+                    spot_delta_pct=0.0,
+                    open_price=window.open_price,
+                    token_id=info["up_token_id"] or "",
+                )
+                self._tracker.record_trade(trade, strategy="momentum")
+                log.warning(
+                    "[KILLSHOT] Spread partial: UP filled, DOWN cancelled — recording as directional",
+                )
+            else:
+                self._cancel_order(up_oid)
+                trade = PaperTrade(
+                    timestamp=time.time(),
+                    asset=window.asset,
+                    market_id=market_id,
+                    question=window.question,
+                    direction="down",
+                    entry_price=info["down_price"],
+                    size_usd=round(info["size_usd"] / 2, 2),
+                    shares=info["down_shares"],
+                    window_end_ts=window.end_ts,
+                    spot_delta_pct=0.0,
+                    open_price=window.open_price,
+                    token_id=info["down_token_id"] or "",
+                )
+                self._tracker.record_trade(trade, strategy="momentum")
+                log.warning(
+                    "[KILLSHOT] Spread partial: DOWN filled, UP cancelled — recording as directional",
+                )
+            to_remove.append(market_id)
+
+    def _cancel_order(self, order_id: str) -> bool:
+        """Cancel a GTC order via py_clob_client."""
+        if not self._client:
+            return False
+        try:
+            self._client.cancel(order_id)
+            return True
+        except Exception as e:
+            log.warning("[KILLSHOT] Cancel failed for %s: %s", order_id[:12], str(e)[:100])
+            return False
+
+    def _check_order_fill(self, order_id: str) -> bool:
+        """Check if a GTC order has been filled."""
+        if not self._client:
+            return False
+        try:
+            order = self._client.get_order(order_id)
+            status = (order.get("status") or "").lower()
+            return status in ("matched", "filled")
+        except Exception as e:
+            log.debug("[KILLSHOT] Order check failed for %s: %s", order_id[:12], str(e)[:80])
+            return False
+
+    def _try_rust_order(
+        self, token_id: str, price: float, shares: float,
+    ) -> tuple[float | None, float, str] | None:
+        """Try the Rust executor. Returns (entry_price, shares, order_id) or None on failure."""
+        if not self._rust_http or not self._rust_url:
+            return None
+        try:
+            resp = self._rust_http.post(
+                f"{self._rust_url}/order",
+                json={
+                    "token_id": token_id,
+                    "price": price,
+                    "size": shares,
+                    "side": "BUY",
+                    "order_type": "FOK",
+                    "neg_risk": True,
+                },
+            )
+            data = resp.json()
+            latency = data.get("latency_ms", 0)
+            if data.get("success"):
+                log.info(
+                    "[KILLSHOT] Rust executor: %s | %.1fms",
+                    data.get("status", "matched"), latency,
+                )
+                return (
+                    data.get("avg_price", price),
+                    data.get("total_shares", shares),
+                    data.get("order_id", "unknown"),
+                )
+            else:
+                log.warning(
+                    "[KILLSHOT] Rust executor rejected: %s | %.1fms",
+                    data.get("error", "unknown"), latency,
+                )
+                return None
+        except Exception as e:
+            log.warning("[KILLSHOT] Rust executor down — falling back to Python: %s", str(e)[:100])
+            return None
 
     def _place_live_order(
         self, token_id: str, market_ask: float | None, size_usd: float,
     ) -> tuple[float | None, float, str]:
         """Place a FOK buy order. Returns (entry_price, shares, order_id) or (None, 0, '').
 
+        Tries Rust executor first (fast path), falls back to Python py_clob_client.
         FOK (Fill-or-Kill): entire order fills immediately or is cancelled.
-        No stale orders sitting on the book — clean binary outcome.
         """
+        # Cross the spread: ask + 1¢
+        if market_ask and market_ask > 0:
+            price = round(market_ask + 0.01, 2)
+        else:
+            price = 0.90  # fallback
+        price = min(price, 0.99)
+
+        shares = round(size_usd / price, 2)
+        if shares < 5:
+            shares = 5.0
+            size_usd = round(shares * price, 2)
+            log.info("[KILLSHOT] Bumped to min 5 shares ($%.2f)", size_usd)
+
+        # ── Try Rust executor (fast path) ──
+        rust_result = self._try_rust_order(token_id, price, shares)
+        if rust_result is not None:
+            return rust_result
+
+        # ── Python fallback ──
         try:
             from py_clob_client.clob_types import OrderArgs, OrderType
             from py_clob_client.order_builder.constants import BUY
-
-            # Cross the spread: ask + 1¢
-            if market_ask and market_ask > 0:
-                price = round(market_ask + 0.01, 2)
-            else:
-                price = 0.90  # fallback
-
-            # No cap — whale pays 90-95¢, so do we
-            price = min(price, 0.99)
-
-            shares = round(size_usd / price, 2)
-            if shares < 5:
-                shares = 5.0
-                size_usd = round(shares * price, 2)
-                log.info("[KILLSHOT] Bumped to min 5 shares ($%.2f)", size_usd)
 
             order_args = OrderArgs(
                 price=price,
@@ -261,9 +1005,8 @@ class KillshotEngine:
             order_id = resp.get("orderID") or resp.get("id", "unknown")
             status = resp.get("status", "")
 
-            log.info("[KILLSHOT] CLOB response: %s", json.dumps(resp)[:500])
+            log.info("[KILLSHOT] CLOB response (Python): %s", json.dumps(resp)[:500])
 
-            # Only accept "matched" or "filled" — "live" means unfilled (stale)
             if status.lower() in ("matched", "filled"):
                 matches = resp.get("matchedOrders", []) or resp.get("matched_orders", [])
                 if matches:
@@ -306,6 +1049,11 @@ class KillshotEngine:
         }
         self._skip_cooldown = {
             k: v for k, v in self._skip_cooldown.items() if v > cutoff
+        }
+        # Clean stale pending limit orders (shouldn't survive timeout, but safety net)
+        self._pending_limit_orders = {
+            k: v for k, v in self._pending_limit_orders.items()
+            if v.get("placed_at", 0) > cutoff
         }
         removed = before - len(self._traded_windows)
         if removed:

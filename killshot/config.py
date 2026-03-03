@@ -34,8 +34,8 @@ class KillshotConfig:
     entry_price_max: float = float(_env("KILLSHOT_ENTRY_PRICE_MAX", "0.75"))
 
     # Kill zone — how many seconds before window close to evaluate
-    window_seconds: int = int(_env("KILLSHOT_WINDOW_SECONDS", "20"))
-    min_window_seconds: int = int(_env("KILLSHOT_MIN_WINDOW_SECONDS", "10"))
+    window_seconds: int = int(_env("KILLSHOT_WINDOW_SECONDS", "35"))
+    min_window_seconds: int = int(_env("KILLSHOT_MIN_WINDOW_SECONDS", "0"))
 
     # Assets (comma-separated)
     assets_str: str = _env("KILLSHOT_ASSETS", "bitcoin")
@@ -50,6 +50,29 @@ class KillshotConfig:
     clob_api_secret: str = _env("KILLSHOT_CLOB_API_SECRET", "")
     clob_api_passphrase: str = _env("KILLSHOT_CLOB_API_PASSPHRASE", "")
     funder_address: str = _env("KILLSHOT_FUNDER_ADDRESS", "")
+
+    # Rust executor URL (empty = disabled, Python-only mode)
+    rust_executor_url: str = _env("KILLSHOT_RUST_EXECUTOR_URL", "http://127.0.0.1:9999")
+
+    # Momentum (early-entry strategy)
+    momentum_enabled: bool = _env("KILLSHOT_MOMENTUM_ENABLED", "false").lower() in ("true", "1", "yes")
+    momentum_entry_start_s: int = int(_env("KILLSHOT_MOMENTUM_ENTRY_START_S", "30"))
+    momentum_entry_end_s: int = int(_env("KILLSHOT_MOMENTUM_ENTRY_END_S", "60"))
+    momentum_entry_price_min: float = float(_env("KILLSHOT_MOMENTUM_ENTRY_PRICE_MIN", "0.45"))
+    momentum_entry_price_max: float = float(_env("KILLSHOT_MOMENTUM_ENTRY_PRICE_MAX", "0.55"))
+    momentum_max_bet_usd: float = float(_env("KILLSHOT_MOMENTUM_MAX_BET_USD", "5"))
+    momentum_prev_candle_threshold: float = float(_env("KILLSHOT_MOMENTUM_PREV_CANDLE_THRESHOLD", "0.0005"))
+    momentum_confirm_threshold: float = float(_env("KILLSHOT_MOMENTUM_CONFIRM_THRESHOLD", "0.0003"))
+    momentum_flow_min_strength: float = float(_env("KILLSHOT_MOMENTUM_FLOW_MIN_STRENGTH", "0.3"))
+    momentum_fill_timeout_s: int = int(_env("KILLSHOT_MOMENTUM_FILL_TIMEOUT_S", "30"))
+    momentum_min_signals: int = int(_env("KILLSHOT_MOMENTUM_MIN_SIGNALS", "2"))
+
+    # Spread capture (both-sides guaranteed profit)
+    spread_enabled: bool = _env("KILLSHOT_SPREAD_ENABLED", "false").lower() in ("true", "1", "yes")
+    spread_max_combined_cost: float = float(_env("KILLSHOT_SPREAD_MAX_COMBINED", "0.97"))
+    spread_max_bet_usd: float = float(_env("KILLSHOT_SPREAD_MAX_BET_USD", "5"))
+    spread_entry_start_s: int = int(_env("KILLSHOT_SPREAD_ENTRY_START_S", "15"))
+    spread_entry_end_s: int = int(_env("KILLSHOT_SPREAD_ENTRY_END_S", "60"))
 
     @property
     def assets(self) -> list[str]:
