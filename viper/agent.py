@@ -1,108 +1,139 @@
 ```python
 import logging
 import time
-import random
+import sys
 from typing import Optional, Dict, Any
 from datetime import datetime
+
+# Import local modules
+from viper.anomaly import check_anomalies
+from viper.pnl import calculate_pnl
+from viper.brain import generate_strategy
+from viper.budget import check_budget
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger("viper.agent")
+logger = logging.getLogger("ViperAgent")
 
 class ViperAgent:
     def __init__(self):
-        self.is_running = False
         self.retry_count = 0
         self.max_retries = 5
-        self.base_delay = 1.0
+        self.is_running = True
         self.last_error: Optional[str] = None
 
-    def connect(self) -> bool:
-        """Simulate connection logic. Replace with actual API connection."""
-        # Simulate potential connection failure for testing
-        if random.random() < 0.2:
-            raise ConnectionError("Simulated connection failure")
-        return True
-
-    def run_loop(self):
-        """Main agent loop with robust error handling."""
-        self.is_running = True
+    def run_loop(self) -> None:
+        """
+        Main execution loop. Wraps the entire process in a try-except block
+        to prevent the agent from crashing on the first error.
+        Implements graceful degradation and retry logic.
+        """
         logger.info("Viper Agent starting main loop...")
-
+        
         while self.is_running:
             try:
-                # Attempt connection
-                if not self.connect():
-                    logger.warning("Connection established but data fetch failed.")
-                
-                # Process logic
-                self.process_data()
+                self._execute_cycle()
                 
                 # Reset retry count on success
                 self.retry_count = 0
                 self.last_error = None
                 
-                # Sleep before next cycle
-                time.sleep(5)
+                # Wait before next cycle (adjust interval as needed)
+                time.sleep(5) 
 
+            except KeyboardInterrupt:
+                logger.warning("Agent interrupted by user (Ctrl+C). Shutting down gracefully.")
+                self.is_running = False
+                
             except ConnectionError as e:
-                self.handle_connection_error(e)
+                # Specific handling for network/API failures
+                self._handle_connection_error(e)
+                
             except Exception as e:
-                # Catch-all for unexpected errors to prevent crash
-                self.handle_unexpected_error(e)
-            finally:
-                # Ensure state is updated
-                if not self.is_running:
-                    break
+                # Fallback for any other runtime errors
+                self._handle_generic_error(e)
 
-    def handle_connection_error(self, error: ConnectionError):
-        """Handle connection errors with exponential backoff."""
+    def _execute_cycle(self) -> None:
+        """
+        Executes the core logic of the agent: Anomaly Check -> PnL -> Brain -> Budget.
+        """
+        logger.debug("Executing agent cycle...")
+        
+        # 1. Check Anomalies
+        anomaly_status = check_anomalies()
+        if anomaly_status is None:
+            logger.warning("Anomaly check returned None, proceeding with caution.")
+
+        # 2. Calculate PnL
+        pnl_data = calculate_pnl()
+        if pnl_data is None:
+            logger.warning("PnL calculation failed or returned None.")
+
+        # 3. Generate Strategy
+        strategy = generate_strategy(pnl_data)
+        if strategy is None:
+            logger.warning("Brain generated no strategy, defaulting to hold.")
+            strategy = {"action": "hold"}
+
+        # 4. Check Budget
+        budget_ok = check_budget()
+        if not budget_ok:
+            logger.warning("Budget check failed. Pausing trading actions.")
+            return
+
+        # Execute Strategy (Mock execution for this reconstruction)
+        self._execute_strategy(strategy)
+
+    def _execute_strategy(self, strategy: Dict[str, Any]) -> None:
+        """
+        Executes the strategy returned by the brain.
+        """
+        action = strategy.get("action", "hold")
+        logger.info(f"Executing strategy: {action}")
+        # Actual trading logic would go here
+        # self.trader.execute(action)
+
+    def _handle_connection_error(self, error: ConnectionError) -> None:
+        """
+        Handles ConnectionError specifically. Implements backoff and retry.
+        """
         self.retry_count += 1
         self.last_error = str(error)
         
-        if self.retry_count > self.max_retries:
-            logger.critical(f"Max retries ({self.max_retries}) exceeded. Shutting down.")
-            self.is_running = False
-            return
-
-        delay = self.base_delay * (2 ** (self.retry_count - 1))
-        logger.warning(f"Connection error: {error}. Retrying in {delay:.2f}s (Attempt {self.retry_count}/{self.max_retries})")
+        logger.error(f"Connection Error detected (Attempt {self.retry_count}/{self.max_retries}): {error}")
         
-        try:
-            time.sleep(delay)
-        except KeyboardInterrupt:
-            logger.info("Interrupted during retry sleep.")
+        if self.retry_count >= self.max_retries:
+            logger.critical(f"Max retries ({self.max_retries}) exceeded. Entering HALT state.")
             self.is_running = False
+            # In a real scenario, trigger a restart mechanism here
+        else:
+            backoff = 2 ** self.retry_count
+            logger.info(f"Retrying in {backoff} seconds...")
+            time.sleep(backoff)
 
-    def handle_unexpected_error(self, error: Exception):
-        """Log and handle unexpected exceptions gracefully."""
-        logger.error(f"Unexpected exception in agent loop: {type(error).__name__} - {error}", exc_info=True)
+    def _handle_generic_error(self, error: Exception) -> None:
+        """
+        Handles generic exceptions. Logs traceback and continues loop to prevent crash.
+        """
+        self.retry_count += 1
         self.last_error = str(error)
-        # Do not increment retry count for logic errors, just log and continue or stop based on severity
-        # For now, we sleep briefly to prevent tight loops
-        time.sleep(1)
-
-    def process_data(self):
-        """Placeholder for actual data processing logic."""
-        # This would call anomaly.py, pnl.py, etc.
-        pass
-
-    def stop(self):
-        """Stop the agent loop."""
-        logger.info("Stopping Viper Agent...")
-        self.is_running = False
+        
+        logger.error(f"Generic Exception caught: {type(error).__name__} - {error}", exc_info=True)
+        
+        if self.retry_count >= self.max_retries:
+            logger.critical(f"Max retries exceeded for generic error. Halting.")
+            self.is_running = False
+        else:
+            logger.info(f"Retrying in 5 seconds...")
+            time.sleep(5)
 
 def main():
     agent = ViperAgent()
-    try:
-        agent.run_loop()
-    except KeyboardInterrupt:
-        logger.info("Manual stop requested.")
-    finally:
-        agent.stop()
+    agent.run_loop()
 
 if __name__ == "__main__":
     main()
