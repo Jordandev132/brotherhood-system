@@ -1,78 +1,85 @@
 ```python
-import logging
-from typing import Any, List, Dict
-from dataclasses import dataclass
+"""
+anomaly.py - KILLSHOT Anomaly Detection Module
+Handles detection of statistical anomalies in trading data.
+"""
 
-# Re-define BalanceData for standalone usage or import from agent
-@dataclass
-class BalanceData:
-    signature_type: str
-    amount: float
-    currency: str
+import logging
+from typing import Optional, Dict, Any, List
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-def detect_anomalies(data_stream: List[Any]) -> List[Dict[str, Any]]:
+def detect_anomalies(data: List[Dict[str, Any]], threshold: float = 2.0) -> List[Dict[str, Any]]:
     """
-    Scans a list of data items for type mismatches and structural anomalies.
-    Returns a list of anomaly reports.
-    """
-    anomalies = []
+    Detect statistical anomalies in the provided data list.
     
-    for idx, item in enumerate(data_stream):
-        # Check 1: Is it a string where an object is expected?
-        # Heuristic: If it's a string and looks like JSON but fails parsing, or just a raw string
-        if isinstance(item, str):
-            # Attempt to parse as JSON to see if it *should* be an object
-            import json
-            try:
-                json.loads(item)
-                # If it parses, it might be a valid JSON string representing an object.
-                # However, if the system expects a BalanceData object, a string is still an anomaly.
-                anomalies.append({
-                    "index": idx,
-                    "type": "TYPE_MISMATCH",
-                    "description": "String received where BalanceData object expected",
-                    "raw_sample": item[:50]
-                })
-            except json.JSONDecodeError:
-                # If it doesn't parse, it's definitely garbage or unstructured data.
-                anomalies.append({
-                    "index": idx,
-                    "type": "MALFORMED_DATA",
-                    "description": "Invalid JSON string in data stream",
-                    "raw_sample": item[:50]
-                })
+    Args:
+        data: List of data points (dicts) containing 'value' or similar numeric keys.
+        threshold: Standard deviations threshold for anomaly detection.
         
-        # Check 2: Is it an object missing required attributes?
-        elif hasattr(item, '__dict__'):
-            if not hasattr(item, 'signature_type'):
-                anomalies.append({
-                    "index": idx,
-                    "type": "MISSING_ATTRIBUTE",
-                    "description": "Object missing 'signature_type' attribute",
-                    "object_type": type(item).__name__
-                })
-        else:
-            # Unknown type
-            anomalies.append({
-                "index": idx,
-                "type": "UNKNOWN_TYPE",
-                "description": f"Unexpected type: {type(item)}",
-                "raw_sample": str(item)[:50]
-            })
-            
-    return anomalies
+    Returns:
+        List of detected anomalies with metadata.
+    """
+    if not data:
+        return []
 
-# Test execution
-if __name__ == "__main__":
-    test_data = [
-        '{"signature_type": "BTC", "amount": 100}', # String (Anomaly)
-        "garbage", # String (Anomaly)
-        {"signature_type": "ETH", "amount": 50}, # Dict (Anomaly - not object)
-        type('FakeObj', (), {'signature_type': 'X', 'amount': 1})() # Fake Object (Valid-ish)
-    ]
+    try:
+        values = [point.get('value', 0) for point in data if isinstance(point.get('value'), (int, float))]
+        
+        if len(values) < 2:
+            return []
+
+        mean = sum(values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        std_dev = variance ** 0.5 if variance > 0 else 0.0
+
+        anomalies = []
+        for point in data:
+            val = point.get('value', 0)
+            if std_dev > 0:
+                z_score = abs(val - mean) / std_dev
+                if z_score > threshold:
+                    anomalies.append({
+                        "timestamp": point.get('timestamp', datetime.now().isoformat()),
+                        "value": val,
+                        "z_score": z_score,
+                        "type": "statistical_anomaly"
+                    })
+            else:
+                # If std_dev is 0, any non-mean value is an anomaly
+                if val != mean:
+                    anomalies.append({
+                        "timestamp": point.get('timestamp', datetime.now().isoformat()),
+                        "value": val,
+                        "z_score": float('inf'),
+                        "type": "statistical_anomaly"
+                    })
+        
+        return anomalies
+
+    except Exception as e:
+        logger.error(f"Error in detect_anomalies: {str(e)}")
+        return []
+
+def validate_data_integrity(data: List[Dict[str, Any]]) -> bool:
+    """
+    Basic validation of data integrity.
     
-    results = detect_anomalies(test_data)
-    for r in results:
-        print(f"Anomaly: {r}")
+    Args:
+        data: List of data points.
+        
+    Returns:
+        True if data is valid, False otherwise.
+    """
+    if not isinstance(data, list):
+        return False
+    
+    for item in data:
+        if not isinstance(item, dict):
+            return False
+        if 'value' not in item:
+            return False
+            
+    return True
+```
