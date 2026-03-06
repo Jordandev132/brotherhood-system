@@ -1,85 +1,71 @@
 ```python
-"""
-anomaly.py - KILLSHOT Anomaly Detection Module
-Handles detection of statistical anomalies in trading data.
-"""
-
 import logging
-from typing import Optional, Dict, Any, List
-from datetime import datetime
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def detect_anomalies(data: List[Dict[str, Any]], threshold: float = 2.0) -> List[Dict[str, Any]]:
+class AnomalyDetector:
     """
-    Detect statistical anomalies in the provided data list.
+    Detects anomalies in agent state or market data.
+    Returns safe defaults instead of throwing exceptions on missing data.
+    """
     
-    Args:
-        data: List of data points (dicts) containing 'value' or similar numeric keys.
-        threshold: Standard deviations threshold for anomaly detection.
-        
-    Returns:
-        List of detected anomalies with metadata.
-    """
-    if not data:
-        return []
+    def __init__(self, threshold: float = 0.95):
+        self.threshold = threshold
+        self.detected_anomalies = []
 
-    try:
-        values = [point.get('value', 0) for point in data if isinstance(point.get('value'), (int, float))]
-        
-        if len(values) < 2:
-            return []
+    def check_state(self, state_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Checks state data for anomalies.
+        Returns None if data is missing or valid, otherwise returns anomaly details.
+        """
+        if not state_data:
+            logger.debug("No state data provided for anomaly check.")
+            return None
 
-        mean = sum(values) / len(values)
-        variance = sum((x - mean) ** 2 for x in values) / len(values)
-        std_dev = variance ** 0.5 if variance > 0 else 0.0
-
-        anomalies = []
-        for point in data:
-            val = point.get('value', 0)
-            if std_dev > 0:
-                z_score = abs(val - mean) / std_dev
-                if z_score > threshold:
-                    anomalies.append({
-                        "timestamp": point.get('timestamp', datetime.now().isoformat()),
-                        "value": val,
-                        "z_score": z_score,
-                        "type": "statistical_anomaly"
-                    })
-            else:
-                # If std_dev is 0, any non-mean value is an anomaly
-                if val != mean:
-                    anomalies.append({
-                        "timestamp": point.get('timestamp', datetime.now().isoformat()),
-                        "value": val,
-                        "z_score": float('inf'),
-                        "type": "statistical_anomaly"
-                    })
-        
-        return anomalies
-
-    except Exception as e:
-        logger.error(f"Error in detect_anomalies: {str(e)}")
-        return []
-
-def validate_data_integrity(data: List[Dict[str, Any]]) -> bool:
-    """
-    Basic validation of data integrity.
-    
-    Args:
-        data: List of data points.
-        
-    Returns:
-        True if data is valid, False otherwise.
-    """
-    if not isinstance(data, list):
-        return False
-    
-    for item in data:
-        if not isinstance(item, dict):
-            return False
-        if 'value' not in item:
-            return False
+        try:
+            # Example logic: Check for missing critical fields
+            required_fields = ["price", "volume", "timestamp"]
+            missing_fields = [f for f in required_fields if f not in state_data]
             
-    return True
+            if missing_fields:
+                anomaly = {
+                    "type": "missing_data",
+                    "fields": missing_fields,
+                    "confidence": 0.9,
+                    "message": f"Missing required fields: {missing_fields}"
+                }
+                self.detected_anomalies.append(anomaly)
+                logger.warning(f"Anomaly detected: {anomaly['message']}")
+                return anomaly
+            
+            # Check for statistical anomalies (e.g., price spike)
+            if "price" in state_data and "volume" in state_data:
+                if state_data["price"] > 0 and state_data["volume"] > 0:
+                    ratio = state_data["price"] / state_data["volume"]
+                    if ratio > self.threshold:
+                        return {
+                            "type": "statistical_anomaly",
+                            "ratio": ratio,
+                            "confidence": 0.85,
+                            "message": "Price-to-volume ratio exceeds threshold"
+                        }
+            
+            return None
+
+        except Exception as e:
+            # Catch any logic errors to prevent crashing the detector
+            logger.error(f"Error in anomaly detection logic: {e}", exc_info=True)
+            return {
+                "type": "detection_error",
+                "message": str(e),
+                "confidence": 0.0
+            }
+
+    def get_anomalies(self) -> list:
+        return self.detected_anomalies
+
+    def clear_anomalies(self):
+        self.detected_anomalies = []
+        logger.info("Anomaly history cleared.")
 ```

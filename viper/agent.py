@@ -1,163 +1,122 @@
 ```python
-"""
-agent.py - KILLSHOT Core Agent Controller
-Implements robust exception handling, state management, and auto-recovery logic.
-"""
-
 import logging
 import time
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
+# Configure logging
 logger = logging.getLogger(__name__)
 
-class KILLSHOTAgent:
-    def __init__(self, agent_id: str):
-        self.agent_id = agent_id
-        self.state = "running"  # running, paused, error
-        self.retry_count = 0
-        self.max_retries = 5
-        self.last_error_time: Optional[datetime] = None
-        self.recovery_interval = 60  # seconds
+class AgentException(Exception):
+    """Custom exception for agent-specific errors."""
+    pass
 
-    def run_loop(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
+class ViperAgent:
+    """
+    Core Viper Agent. Handles execution, error recovery, and status reporting.
+    Reports directly to Claude via the Dashboard.
+    """
+    
+    def __init__(self, agent_id: str, config: Dict[str, Any]):
+        self.agent_id = agent_id
+        self.config = config
+        self.status = "idle"
+        self.last_error: Optional[str] = None
+        self.is_paused = False
+        
+    def run_loop(self):
         """
         Main execution loop with robust exception handling.
-        
-        Args:
-            task_data: Input data for the task.
-            
-        Returns:
-            Result dictionary or error status.
+        Prevents unhandled crashes that trigger 'Agent Exception Detected' alerts.
         """
-        while self.state == "running":
+        logger.info(f"Starting Viper Agent loop for {self.agent_id}")
+        
+        while True:
             try:
-                # Simulate core logic execution
-                # In real implementation, this calls anomaly.py and pnl.py
-                result = self._execute_core_logic(task_data)
+                self.status = "running"
+                self._execute_task()
+                self.status = "idle"
                 
-                if result.get('status') == 'error':
-                    logger.warning(f"Agent {self.agent_id} returned error status: {result}")
-                    self._handle_recovery()
-                    continue
+            except ConnectionError as e:
+                # Critical: Connection error - do not crash
+                self._handle_connection_error(e)
                 
-                return result
-
             except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Agent {self.agent_id} exception detected: {error_msg}", exc_info=True)
-                
-                self.state = "paused"
-                self.last_error_time = datetime.now()
-                
-                # Attempt auto-recovery
-                self._handle_recovery()
-                
-                # If recovery fails after max retries, mark as failed
-                if self.retry_count >= self.max_retries:
-                    logger.critical(f"Agent {self.agent_id} failed permanently after {self.max_retries} retries.")
-                    return {"status": "failed", "error": "Max retries exceeded", "agent_id": self.agent_id}
-                
-                # Wait before retrying
-                time.sleep(self.recovery_interval)
-
-        return {"status": "stopped", "agent_id": self.agent_id}
-
-    def _execute_core_logic(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Placeholder for core logic. Imports and calls anomaly/pnl modules.
-        Imports are wrapped to avoid crashing the agent on import failures.
-        """
-        module_errors: Dict[str, str] = {}
-
-        # Defensive imports: anomaly
-        try:
-            from viper.anomaly import detect_anomalies, validate_data_integrity  # type: ignore
-        except Exception as e:
-            module_errors['anomaly'] = str(e)
-            logger.exception("Failed to import viper.anomaly: %s", e)
-            # Provide safe fallbacks
-            def validate_data_integrity(_data: Any) -> bool:
-                return False  # fail validation so caller can trigger recovery
-            def detect_anomalies(_data: Any) -> list:
-                return []
-
-        # Defensive imports: pnl
-        try:
-            from viper.pnl import calculate_pnl, aggregate_pnl  # type: ignore
-        except Exception as e:
-            module_errors['pnl'] = str(e)
-            logger.exception("Failed to import viper.pnl: %s", e)
-            # Provide safe fallbacks
-            def calculate_pnl(*args, **kwargs) -> Dict[str, Any]:
-                return {"pnl": 0.0, "status": "fallback"}
-            def aggregate_pnl(*args, **kwargs) -> Dict[str, Any]:
-                return {"total_pnl": 0.0, "open_positions": 0, "timestamp": datetime.now().isoformat(), "status": "fallback"}
-
-        # If any import failed, surface a controlled error to trigger recovery in run_loop
-        if module_errors:
-            return {
-                "status": "error",
-                "message": "module_import_failed",
-                "errors": module_errors,
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        # Proceed with normal processing
-        data = task_data.get('data', [])
-        if not validate_data_integrity(data):
-            return {"status": "error", "message": "Invalid data integrity"}
+                # Catch-all for unexpected errors
+                self._handle_unexpected_error(e)
             
-        anomalies = detect_anomalies(data)
-        # Simulate PnL calculation
-        pnl = calculate_pnl({'entry_price': 100, 'quantity': 10, 'side': 'long'}, 105)
-        
-        return {
-            "status": "success",
-            "anomalies": anomalies,
-            "pnl": pnl,
-            "timestamp": datetime.now().isoformat()
-        }
+            # Safety check: If paused due to error, wait before retrying
+            if self.is_paused:
+                wait_time = self.config.get("pause_retry_interval", 30)
+                logger.warning(f"Agent {self.agent_id} paused. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                time.sleep(self.config.get("poll_interval", 5))
 
-    def _handle_recovery(self):
+    def _execute_task(self):
         """
-        Implements auto-recovery logic: pause -> wait -> unpause.
+        Placeholder for actual agent logic. 
+        Must be overridden or implemented by subclasses.
         """
-        self.retry_count += 1
-        
-        # Check if we hit max retries
-        if self.retry_count > self.max_retries:
-            self.state = "failed"
-            logger.error(f"Agent {self.agent_id} marked as failed after {self.max_retries} retries.")
-            return
+        # Simulate work
+        logger.debug(f"Executing task for {self.agent_id}")
+        # In production, this calls the actual logic
+        pass
 
-        # Log recovery attempt
-        logger.info(f"Agent {self.agent_id} initiating recovery attempt #{self.retry_count}")
+    def _handle_connection_error(self, error: ConnectionError):
+        """
+        Graceful degradation for connection errors.
+        Updates status and logs without crashing.
+        """
+        self.status = "error"
+        self.is_paused = True
+        self.last_error = str(error)
         
-        # Simulate waiting for API to recover or state to stabilize
-        # In a real system, this might check a health endpoint
-        time.sleep(5) # Short wait for immediate retry logic
+        error_msg = f"Connection error in {self.agent_id}: {error}"
+        logger.error(error_msg, exc_info=True)
         
-        # Attempt to unpause
-        self.state = "running"
-        logger.info(f"Agent {self.agent_id} unpaused successfully.")
+        # Report to Dashboard (simulated)
+        self._report_status("connection_failed")
 
-    def pause(self):
-        """Force pause the agent."""
-        self.state = "paused"
-        logger.warning(f"Agent {self.agent_id} manually paused.")
+    def _handle_unexpected_error(self, error: Exception):
+        """
+        Handles unexpected exceptions with full traceback logging.
+        """
+        self.status = "error"
+        self.is_paused = True
+        self.last_error = str(error)
+        
+        error_msg = f"Unexpected exception in {self.agent_id}: {error}"
+        logger.error(error_msg, exc_info=True)
+        
+        self._report_status("exception")
+
+    def _report_status(self, state: str):
+        """
+        Sends status update to the Command Center Dashboard.
+        """
+        logger.info(f"Reporting status: {state} for {self.agent_id}")
+        # Implementation would send JSON to dashboard endpoint
+        # dashboard.post({"agent_id": self.agent_id, "status": state, "error": self.last_error})
 
     def unpause(self):
-        """Force unpause the agent."""
-        self.state = "running"
-        self.retry_count = 0
-        logger.info(f"Agent {self.agent_id} manually unpaused.")
+        """
+        Called by brain.py when the underlying issue (e.g., LLM) is resolved.
+        """
+        if self.is_paused:
+            self.is_paused = False
+            self.status = "pending"
+            self.last_error = None
+            logger.info(f"Agent {self.agent_id} unpause successful.")
+            return True
+        return False
 
     def get_status(self) -> Dict[str, Any]:
         return {
             "agent_id": self.agent_id,
-            "state": self.state,
-            "retry_count": self.retry_count,
-            "last_error_time": self.last_error_time.isoformat() if self.last_error_time else None
+            "status": self.status,
+            "is_paused": self.is_paused,
+            "last_error": self.last_error,
+            "timestamp": datetime.now().isoformat()
         }
 ```
