@@ -162,9 +162,13 @@ def _match_game(
         log.debug("[ESPN] Best match score too low (%.3f) for %s vs %s | question: %s",
                   best_score, team_a, team_b, question[:80])
         return None
-    log.debug("[ESPN] Matched event (score=%.3f): %s", best_score, best_match.get("id", best_match.get("name", "") if best_match else "" ) if best_match else "")
+    # Log a compact id or name for debugging (avoid nested ternary in format string)
+    match_id = ""
+    if best_match:
+        # keep guard for different event schemas
+        match_id = best_match.get("id") or best_match.get("name") or ""
+    log.debug("[ESPN] Matched event (score=%.3f): %s", best_score, match_id)
     return best_match
-
 def get_match_context(
     question: str,
     sport_key: str,

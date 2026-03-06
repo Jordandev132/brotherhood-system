@@ -28,7 +28,13 @@ class TradeOpportunity:
 
 # Fix 2: R:R ratio filter — only bet when potential win > 1.2x potential loss
 MIN_RR_RATIO = 0.65
-MAX_TOKEN_PRICE = 0.60  # Never buy tokens above $0.50 (Kelly sizing caps downside)
+MAX_TOKEN_PRICE = 0.60  # Never buy tokens above $0.60 (Kelly sizing caps downside)
+
+# Entry price floor — never buy tokens below 5c (illiquid garbage, fake edge)
+MIN_TOKEN_PRICE = 0.05
+
+# Weather YES probability floor — don't buy YES unless model is >= 30% confident
+MIN_WEATHER_YES_PROB = 0.30
 
 # Fix 5: Confidence floor — reject GPT guesses (sportsbook-backed exempt)
 MIN_CONFIDENCE = 0.60
@@ -124,23 +130,36 @@ def smart_kelly_size(
 def _get_market_price(market: HawkMarket, outcome: str = "yes") -> float:
     """Get current market price for a given outcome (handles Yes/No/Over/Under)."""
     target = _YES_OUTCOMES if outcome == "yes" else _NO_OUTCOMES
-    for t in market.tokens:
-        tok_outcome = (t.get("outcome") or "").lower()
+    tokens = getattr(market, "tokens", []) or []
+
+    # First pass: match explicit outcome strings (yes/no/over/under/up/down)
+    for t in tokens:
+        try:
+            tok_outcome = (t.get("outcome") or "").lower()
+        except Exception:
+            tok_outcome = ""
         if tok_outcome in target:
             try:
                 return float(t.get("price", 0.5))
             except (ValueError, TypeError):
-                return 0.5
-    # Fallback: first token = "yes" equivalent, second = "no" equivalent
-    tokens = market.tokens
-    if len(tokens) == 2:
+                # malformed price for this token, try next candidate
+                continue
+
+    # Fallback: interpret first token as YES-equivalent, second as NO-equivalent
+    if len(tokens) >= 2:
         idx = 0 if outcome == "yes" else 1
         try:
             return float(tokens[idx].get("price", 0.5))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             return 0.5
-    return 0.5
+    elif len(tokens) == 1:
+        try:
+            return float(tokens[0].get("price", 0.5))
+        except (ValueError, TypeError, AttributeError):
+            return 0.5
 
+    # No tokens available — return neutral mid-price
+    return 0.5
 
 def _get_token_id(market: HawkMarket, outcome: str = "yes") -> str:
     """Get the token_id for a given outcome (handles Yes/No/Over/Under + team names)."""
@@ -382,6 +401,18 @@ def calculate_edge(
     if not has_sportsbook and not has_weather_model and not has_cross_platform and estimate.confidence < MIN_CONFIDENCE:
         log.info("Rejected low-confidence trade: conf=%.2f < %.2f | %s",
                  estimate.confidence, MIN_CONFIDENCE, market.question[:50])
+        return None
+
+    # Entry price floor — reject illiquid sub-5c tokens (fake edge, no real market)
+    if buy_price < MIN_TOKEN_PRICE:
+        log.info("[FLOOR] Rejected sub-%.0fc entry: $%.3f | %s",
+                 MIN_TOKEN_PRICE * 100, buy_price, market.question[:50])
+        return None
+
+    # Weather YES probability floor — need strong model confidence to buy YES
+    if has_weather_model and direction == "yes" and est_prob < MIN_WEATHER_YES_PROB:
+        log.info("[FLOOR] Rejected low-prob weather YES: prob=%.1f%% < %.0f%% | %s",
+                 est_prob * 100, MIN_WEATHER_YES_PROB * 100, market.question[:50])
         return None
 
     # Fix 2: R:R ratio filter — potential win must exceed 1.2x potential loss

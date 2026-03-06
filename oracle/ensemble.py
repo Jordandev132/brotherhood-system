@@ -230,13 +230,13 @@ def run_ensemble(
             model_outputs["claude"] = result
             log.info("Claude returned %d predictions", len(result.get("predictions", {})))
 
-    if cfg.gemini_api_key:
-        result = _query_gemini(cfg, system_prompt, user_prompt)
+    if cfg.openai_api_key:
+        result = _query_openai(cfg, system_prompt, user_prompt)
         if result:
-            model_outputs["gemini"] = result
-            log.info("Gemini returned %d predictions", len(result.get("predictions", {})))
+            model_outputs["openai"] = result
+            log.info("GPT-5.2 returned %d predictions", len(result.get("predictions", {})))
         else:
-            log.warning("Gemini returned no parseable predictions")
+            log.warning("GPT-5.2 returned no parseable predictions")
 
     if cfg.grok_api_key:
         result = _query_grok(cfg, system_prompt, user_prompt)
@@ -494,33 +494,39 @@ def _query_claude(cfg: OracleConfig, system: str, user: str) -> dict | None:
             data = resp.json()
             text = data.get("content", [{}])[0].get("text", "")
             return _parse_json_response(text)
-        log.warning("Claude API error: %d", resp.status_code)
+        log.warning("Claude API error: %d — %s", resp.status_code, resp.text[:300])
     except Exception as e:
         log.warning("Claude query failed: %s", e)
     return None
 
 
-def _query_gemini(cfg: OracleConfig, system: str, user: str) -> dict | None:
-    """Query Google Gemini API."""
+def _query_openai(cfg: OracleConfig, system: str, user: str) -> dict | None:
+    """Query OpenAI GPT-5.2 API."""
     try:
         resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{cfg.gemini_model}:generateContent",
-            params={"key": cfg.gemini_api_key},
-            headers={"content-type": "application/json"},
-            json={
-                "system_instruction": {"parts": [{"text": system}]},
-                "contents": [{"parts": [{"text": user}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2000},
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {cfg.openai_api_key}",
+                "content-type": "application/json",
             },
-            timeout=60,
+            json={
+                "model": cfg.openai_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.3,
+                "max_completion_tokens": 4000,
+            },
+            timeout=90,
         )
         if resp.status_code == 200:
             data = resp.json()
-            text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
             return _parse_json_response(text)
-        log.warning("Gemini API error: %d", resp.status_code)
+        log.warning("GPT-5.2 API error: %d — %s", resp.status_code, resp.text[:300])
     except Exception as e:
-        log.warning("Gemini query failed: %s", e)
+        log.warning("GPT-5.2 query failed: %s", e)
     return None
 
 

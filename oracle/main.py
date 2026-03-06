@@ -227,6 +227,9 @@ class OracleBot:
                     f"\U0001f4b5 P&L: *${_res_pnl:+.2f}*"
                 )
 
+        # Step 1b: Expire stale pending predictions (prevents permanent market lockout)
+        self.tracker.expire_stale_predictions(max_age_days=7)
+
         # Step 2: Scan weekly markets (Polymarket + Kalshi)
         log.info("Step 2: Scanning weekly markets...")
         poly_markets = scan_weekly_markets(self.cfg)
@@ -400,8 +403,8 @@ class OracleBot:
         _wagered = sum(t.size for t in selected)
         _trade_lines = ""
         for t in selected[:5]:
-            _t_dir_icon = "\U0001f7e2" if t.direction == "YES" else "\U0001f534"
-            _trade_lines += f"  {_t_dir_icon} {t.question[:50]} — ${t.size:.0f} ({t.edge*100:.0f}% edge)\n"
+            _t_dir_icon = "\U0001f7e2" if t.side == "YES" else "\U0001f534"
+            _trade_lines += f"  {_t_dir_icon} {t.market.question[:50]} — ${t.size:.0f} ({t.edge_abs*100:.0f}% edge)\n"
         if not _trade_lines:
             _trade_lines = "  No trades this cycle\n"
         _oracle_tg(

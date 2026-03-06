@@ -1,9 +1,4 @@
-"""Paper trade tracker — logs trades and computes running P&L.
-
-Resolution: checks CLOB book price for our token after window close.
-If token bid > 0.50, we won (resolved to $1). If < 0.50, we lost ($0).
-Daily PnL resets every day at 7pm ET.
-"""
+"""Paper trade tracker — logs simulated trades and computes running P&L."""
 from __future__ import annotations
 
 import json
@@ -11,9 +6,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 log = logging.getLogger("killshot.tracker")
 
@@ -34,51 +27,28 @@ class PaperTrade:
     asset: str
     market_id: str
     question: str
-    direction: str        # "up" or "down"
-    entry_price: float    # simulated maker order price (e.g. 0.87)
+    direction: str        # "up", "down", or "arb"
+    entry_price: float    # simulated maker order price (or total cost per pair for arb)
     size_usd: float       # dollar amount committed
-    shares: float         # size_usd / entry_price
+    shares: float         # size_usd / entry_price (or num pairs for arb)
     window_end_ts: float  # when this 5m window closes
     spot_delta_pct: float # spot price change % that triggered this trade
     open_price: float     # asset open price at window start
     market_bid: float = 0.0   # CLOB best bid at entry time
     market_ask: float = 0.0   # CLOB best ask at entry time
-    token_id: str = ""        # CLOB token we bought (for on-chain resolution)
-    strategy: str = "directional"  # "directional" (kill zone) or "momentum" (early entry)
     outcome: str = ""     # "win", "loss", or "expired" (empty while pending)
     pnl: float = 0.0
     resolved_at: float = 0.0
 
 
-# 7pm ET — daily PnL resets at this time each day
-_ET = ZoneInfo("America/New_York")
-_DAILY_RESET_HOUR_ET = 19
-
-
-def _last_7pm_et_ts() -> float:
-    """Unix timestamp of the most recent 7pm ET (today or yesterday)."""
-    now_et = datetime.now(_ET)
-    if now_et.hour >= _DAILY_RESET_HOUR_ET:
-        boundary = now_et.replace(hour=_DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
-    else:
-        yesterday = now_et.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        boundary = yesterday.replace(hour=_DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
-    return boundary.timestamp()
-
-
 class PaperTracker:
-    """Tracks trades, resolves via CLOB book price, computes stats."""
+    """Tracks paper trades, resolves at window close, computes stats."""
 
     def __init__(self):
         self._pending: list[PaperTrade] = []
-        self._inherited_ts: set[float] = set()  # timestamps of pre-restart trades
         self._session_pnl: float = 0.0
         self._session_trades: int = 0
         self._session_wins: int = 0
-        self._daily_pnl: float = 0.0
-        self._daily_trades: int = 0
-        self._daily_wins: int = 0
-        self._daily_reset_ts: float = 0.0  # last 7pm ET boundary we reset at
         self._load_pending()
 
     def _load_pending(self) -> None:
@@ -106,55 +76,40 @@ class PaperTracker:
                             window_end_ts=d["window_end_ts"],
                             spot_delta_pct=d.get("spot_delta_pct", 0),
                             open_price=d["open_price"],
-                            token_id=d.get("token_id", ""),
-                            strategy=d.get("strategy", "directional"),
                         )
                         self._pending.append(trade)
-                        self._inherited_ts.add(trade.timestamp)
                 except Exception:
                     continue
         if self._pending:
-            log.info("Loaded %d pending trades from disk (won't count in session stats)", len(self._pending))
+            log.info("Loaded %d pending paper trades from disk", len(self._pending))
 
-    def _maybe_reset_daily(self) -> None:
-        """Reset daily PnL stats when we've passed a new 7pm ET boundary."""
-        boundary = _last_7pm_et_ts()
-        if boundary > self._daily_reset_ts:
-            self._daily_pnl = 0.0
-            self._daily_trades = 0
-            self._daily_wins = 0
-            self._daily_reset_ts = boundary
-
-    def record_trade(self, trade: PaperTrade, strategy: str = "directional") -> None:
-        """Log a new trade."""
-        trade.strategy = strategy
+    def record_trade(self, trade: PaperTrade) -> None:
+        """Log a new paper trade."""
         self._pending.append(trade)
         self._session_trades += 1
         self._append_to_file(trade)
-        strat_tag = f" [{strategy}]" if strategy != "directional" else ""
-        log.info(
-            "[KILLSHOT] Paper trade%s: %s %s @ %.0f¢ ($%.2f, %.1f shares) | delta=%.3f%%",
-            strat_tag, trade.direction.upper(), trade.asset, trade.entry_price * 100,
-            trade.size_usd, trade.shares, trade.spot_delta_pct * 100,
-        )
+        if trade.direction == "arb":
+            log.info(
+                "[KILLSHOT] Arb trade: %s | cost=%.0f¢/pair | $%.2f (%d pairs)",
+                trade.asset, trade.entry_price * 100,
+                trade.size_usd, int(trade.shares),
+            )
+        else:
+            log.info(
+                "[KILLSHOT] Paper trade: %s %s @ %.0f¢ ($%.2f, %.1f shares) | delta=%.3f%%",
+                trade.direction.upper(), trade.asset, trade.entry_price * 100,
+                trade.size_usd, trade.shares, trade.spot_delta_pct * 100,
+            )
 
-    def resolve_trades(self, price_cache, clob_ws=None) -> list[PaperTrade]:
-        """Check pending trades — resolve using CLOB book price (on-chain truth).
-
-        After window closes, check our token's book price:
-        - bid > 0.50 → we won (token resolving to $1)
-        - bid < 0.50 → we lost (token resolving to $0)
-        Falls back to Chainlink if no token_id or book unavailable.
-        """
-        from bot.snipe import clob_book
-
+    def resolve_trades(self, price_cache) -> list[PaperTrade]:
+        """Check pending trades — resolve any whose window has closed."""
         now = time.time()
         resolved = []
         still_pending = []
 
         for trade in self._pending:
-            # Grace period: wait 30s after window close for resolution to settle
-            if now < trade.window_end_ts + 30:
+            # Grace period: wait 10s after window close
+            if now < trade.window_end_ts + 10:
                 still_pending.append(trade)
                 continue
 
@@ -170,75 +125,66 @@ class PaperTracker:
                 )
                 continue
 
-            # ── Primary: check CLOB book price for our token ──
-            won = None
-            if trade.token_id:
-                book = None
-                if clob_ws:
-                    book = clob_ws.get_book(trade.token_id)
-                if book is None:
-                    book = clob_book.get_orderbook(trade.token_id)
-                if book:
-                    bid = book.get("best_bid", 0) or 0
-                    ask = book.get("best_ask", 0) or 0
-                    mid = (bid + ask) / 2 if bid > 0 and ask > 0 else bid or ask
-                    if mid > 0.50:
-                        won = True
-                    elif mid < 0.50:
-                        won = False
-                    # If mid == 0.50, can't determine — fall through
-
-            # ── Fallback: Chainlink price (less reliable) ──
-            if won is None:
-                current_price = price_cache.get_resolution_price(trade.asset)
-                if current_price is None:
-                    still_pending.append(trade)
-                    continue
-                went_up = current_price > trade.open_price
-                won = (trade.direction == "up" and went_up) or \
-                      (trade.direction == "down" and not went_up)
-
-            if won:
+            # Arb trades — guaranteed win (bought both sides)
+            if trade.direction == "arb":
                 trade.outcome = "win"
                 trade.pnl = round(trade.shares * (1.0 - trade.entry_price), 4)
+                trade.resolved_at = now
+                self._session_pnl += trade.pnl
+                self._session_wins += 1
+                resolved.append(trade)
+                self._update_in_file(trade)
+
+                wr = (self._session_wins / max(self._session_trades, 1)) * 100
+                log.info(
+                    "[KILLSHOT] ARB WIN: %s | P&L $%.2f | Session: $%.2f (WR %.0f%%)",
+                    trade.asset, trade.pnl, self._session_pnl, wr,
+                )
+                self._notify_tg(
+                    "\u2705 <b>Killshot ARB WIN</b>\n"
+                    f"{trade.asset.upper()} | Both sides bought\n"
+                    f"P&L: <b>+${trade.pnl:.2f}</b>\n"
+                    f"Session: ${self._session_pnl:.2f} | WR {wr:.0f}% "
+                    f"({self._session_trades} trades)"
+                )
+                continue
+
+            # Determine outcome from Chainlink price (what Polymarket resolves against)
+            current_price = price_cache.get_resolution_price(trade.asset)
+            if current_price is None:
+                still_pending.append(trade)
+                continue
+
+            # Did price go up or down from open?
+            went_up = current_price > trade.open_price
+
+            if (trade.direction == "up" and went_up) or \
+               (trade.direction == "down" and not went_up):
+                trade.outcome = "win"
+                trade.pnl = round(trade.shares * (1.0 - trade.entry_price), 4)
+                self._session_wins += 1
             else:
                 trade.outcome = "loss"
                 trade.pnl = round(-trade.size_usd, 4)
 
             trade.resolved_at = now
+            self._session_pnl += trade.pnl
             resolved.append(trade)
             self._update_in_file(trade)
 
-            # Don't count inherited (pre-restart) trades in session stats
-            inherited = trade.timestamp in self._inherited_ts
-            if not inherited:
-                if won:
-                    self._session_wins += 1
-                self._session_pnl += trade.pnl
-                self._maybe_reset_daily()
-                self._daily_trades += 1
-                if won:
-                    self._daily_wins += 1
-                self._daily_pnl += trade.pnl
-
             wr = (self._session_wins / max(self._session_trades, 1)) * 100
-            daily_wr = (self._daily_wins / max(self._daily_trades, 1)) * 100
-            tag = " [inherited]" if inherited else ""
             log.info(
-                "[KILLSHOT] %s: %s %s | P&L $%.2f | Session: $%.2f (WR %.0f%%)%s",
+                "[KILLSHOT] %s: %s %s | P&L $%.2f | Session: $%.2f (WR %.0f%%)",
                 trade.outcome.upper(), trade.direction.upper(), trade.asset,
-                trade.pnl, self._session_pnl, wr, tag,
+                trade.pnl, self._session_pnl, wr,
             )
             emoji = "\u2705" if trade.outcome == "win" else "\u274c"
             sign = "+" if trade.pnl >= 0 else ""
-            strat_label = {"momentum": "MOM", "spread": "SPR", "directional": "KZ"}.get(trade.strategy, "KZ")
-            daily_sign = "+" if self._daily_pnl >= 0 else ""
             self._notify_tg(
-                f"{emoji} <b>Killshot [{strat_label}] {trade.outcome.upper()}</b>\n"
+                f"{emoji} <b>Killshot {trade.outcome.upper()}</b>\n"
                 f"{trade.direction.upper()} {trade.asset.upper()} @ {trade.entry_price:.0%}\n"
                 f"P&L: <b>{sign}${trade.pnl:.2f}</b>\n"
-                f"Session: {sign if self._session_pnl >= 0 else ''}${self._session_pnl:.2f} | WR {wr:.0f}% ({self._session_trades} trades)\n"
-                f"Daily: {daily_sign if self._daily_pnl >= 0 else ''}${self._daily_pnl:.2f} | WR {daily_wr:.0f}% ({self._daily_trades} trades)"
+                f"Session: {sign if self._session_pnl >= 0 else ''}${self._session_pnl:.2f} | WR {wr:.0f}% ({self._session_trades} trades)"
             )
 
         self._pending = still_pending
@@ -257,22 +203,6 @@ class PaperTracker:
             )
         except Exception:
             pass
-
-    def notify_spread_entry(
-        self,
-        asset: str,
-        up_ask: float,
-        down_ask: float,
-        total_usd: float,
-        guaranteed_profit_pct: float,
-    ) -> None:
-        """Send Telegram notification when a spread trade is entered (both legs)."""
-        combined_cent = (up_ask + down_ask) * 100
-        self._notify_tg(
-            "\u2696\ufe0f <b>Killshot [SPR] ENTRY</b>\n"
-            f"{asset.upper()} UP @ {up_ask:.0%} + DOWN @ {down_ask:.0%} = {combined_cent:.0f}\u00a2\n"
-            f"Size: <b>${total_usd:.2f}</b> | Guaranteed: <b>{guaranteed_profit_pct:.1f}\u00a2/$</b>"
-        )
 
     # ── File I/O ────────────────────────────────────────────────
 
@@ -312,32 +242,16 @@ class PaperTracker:
     # ── Stats & Dashboard ───────────────────────────────────────
 
     def get_stats(self) -> dict:
-        """Dashboard-friendly statistics with per-strategy breakdown."""
+        """Dashboard-friendly statistics."""
         all_trades = self._load_all_trades()
         resolved = [t for t in all_trades if t.get("outcome") in ("win", "loss")]
         wins = sum(1 for t in resolved if t["outcome"] == "win")
         total_pnl = sum(t.get("pnl", 0) for t in resolved)
+        arb_count = sum(1 for t in all_trades if t.get("direction") == "arb")
         avg_entry = 0.0
         if all_trades:
             avg_entry = sum(t.get("entry_price", 0) for t in all_trades) / len(all_trades)
 
-        # Per-strategy breakdown
-        strat_stats = {}
-        for strat in ("directional", "momentum", "spread"):
-            s_resolved = [t for t in resolved if t.get("strategy", "directional") == strat]
-            s_wins = sum(1 for t in s_resolved if t["outcome"] == "win")
-            s_pnl = sum(t.get("pnl", 0) for t in s_resolved)
-            s_total = sum(1 for t in all_trades if t.get("strategy", "directional") == strat)
-            strat_stats[strat] = {
-                "trades": s_total,
-                "resolved": len(s_resolved),
-                "wins": s_wins,
-                "losses": len(s_resolved) - s_wins,
-                "win_rate": round(s_wins / len(s_resolved) * 100, 1) if s_resolved else 0,
-                "pnl": round(s_pnl, 2),
-            }
-
-        self._maybe_reset_daily()
         return {
             "total_trades": len(all_trades),
             "resolved": len(resolved),
@@ -350,11 +264,8 @@ class PaperTracker:
             "session_pnl": round(self._session_pnl, 2),
             "session_trades": self._session_trades,
             "session_wins": self._session_wins,
-            "daily_pnl": round(self._daily_pnl, 2),
-            "daily_trades": self._daily_trades,
-            "daily_wins": self._daily_wins,
             "daily_loss": round(abs(min(self._session_pnl, 0)), 2),
-            "by_strategy": strat_stats,
+            "arb_count": arb_count,
         }
 
     def _load_all_trades(self) -> list[dict]:
