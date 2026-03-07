@@ -1,0 +1,145 @@
+<!-- SHELBY -->
+<div class="tab-content" id="tab-shelby">
+  <div id="intel-shelby" class="intel-meter" style="margin-bottom:12px;"></div>
+  <div class="agent-widget-row" id="shelby-widgets">
+    <button class="btn" onclick="healthCheckAgent('shelby')" style="font-size:0.72rem;">Health Check</button>
+    <button class="btn" onclick="exportAgentReport()" style="font-size:0.74rem;">Download Report</button>
+</div>
+  <div class="health-inline" id="shelby-health-result"></div>
+
+  <!-- Stat Cards -->
+  <div class="grid-4">
+    <div class="stat-card" data-accent="danger"><div class="stat-value" id="shelby-high-priority">--</div><div class="stat-label">High Priority</div></div>
+    <div class="stat-card" data-accent="shelby"><div class="stat-value" id="shelby-tasks-pending">--</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card" data-accent="success"><div class="stat-value" id="shelby-tasks-done-today">--</div><div class="stat-label">Completed Today</div></div>
+    <div class="stat-card" data-accent="atlas"><div class="stat-value" id="shelby-next-due">--</div><div class="stat-label">Next Due</div></div>
+  </div>
+
+  <!-- Add Task — clean 2-row layout -->
+  <div class="glass-card" style="margin:12px 0;border-left:3px solid var(--agent-shelby);padding:14px 16px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <h3 style="font-size:0.76rem;margin:0;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);">Add Task</h3>
+      <span style="font-size:0.68rem;color:var(--text-muted);opacity:0.6;">Priority auto-calculates based on benefit, difficulty & deadline</span>
+    </div>
+    <!-- Row 1: Title + Agent + Due + Add -->
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <input type="text" class="input" id="shelby-add-title" placeholder="What needs to be done?" style="flex:3;font-size:0.82rem;padding:8px 12px;" onkeydown="if(event.key==='Enter')addShelbyTask()">
+      <select class="input" id="shelby-add-agent" style="width:120px;font-size:0.78rem;padding:8px;">
+        <option value="">Assign to...</option>
+        <option value="jordan">Jordan</option>
+        <option value="garves">Garves</option>
+        <option value="soren">Soren</option>
+        <option value="lisa">Lisa</option>
+        <option value="atlas">Atlas</option>
+        <option value="robotox">Robotox</option>
+        <option value="thor">Thor</option>
+        <option value="shelby">Shelby</option>
+        <option value="hawk">Hawk</option>
+        <option value="viper">Viper</option>
+        <option value="quant">Quant</option>
+      </select>
+      <input type="date" class="input" id="shelby-add-due" style="width:140px;font-size:0.78rem;padding:8px;">
+      <button class="btn btn-success" onclick="addShelbyTask()" style="padding:8px 20px;font-size:0.8rem;font-weight:600;white-space:nowrap;">Add Task</button>
+    </div>
+    <!-- Row 2: Optional details — collapsed by default -->
+    <div id="shelby-add-advanced" style="display:none;gap:12px;align-items:center;padding:8px 0 0;border-top:1px solid rgba(255,255,255,0.06);">
+      <div style="display:flex;gap:4px;align-items:center;">
+        <span style="font-size:0.74rem;color:var(--text-muted);margin-right:4px;">Difficulty:</span>
+        <button class="btn shelby-diff-btn" data-val="1" onclick="setShelbyDiff(1,this)" style="padding:4px 12px;font-size:0.74rem;">Easy</button>
+        <button class="btn shelby-diff-btn active" data-val="2" onclick="setShelbyDiff(2,this)" style="padding:4px 12px;font-size:0.74rem;">Medium</button>
+        <button class="btn shelby-diff-btn" data-val="3" onclick="setShelbyDiff(3,this)" style="padding:4px 12px;font-size:0.74rem;">Hard</button>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center;margin-left:16px;">
+        <span style="font-size:0.74rem;color:var(--text-muted);margin-right:4px;">Impact:</span>
+        <button class="btn shelby-ben-btn" data-val="1" onclick="setShelbyBen(1,this)" style="padding:4px 12px;font-size:0.74rem;">Low</button>
+        <button class="btn shelby-ben-btn" data-val="2" onclick="setShelbyBen(2,this)" style="padding:4px 12px;font-size:0.74rem;">Medium</button>
+        <button class="btn shelby-ben-btn active" data-val="3" onclick="setShelbyBen(3,this)" style="padding:4px 12px;font-size:0.74rem;">High</button>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center;margin-left:16px;">
+        <span style="font-size:0.74rem;color:var(--text-muted);margin-right:4px;">Category:</span>
+        <select class="input" id="shelby-add-category" style="font-size:0.76rem;padding:4px 8px;">
+          <option value="">Auto</option>
+          <option value="infrastructure">Infrastructure</option>
+          <option value="integration">Integration</option>
+          <option value="content">Content</option>
+          <option value="trading">Trading</option>
+          <option value="research">Research</option>
+          <option value="ops">Ops</option>
+        </select>
+      </div>
+    </div>
+    <input type="hidden" id="shelby-add-diff" value="2">
+    <input type="hidden" id="shelby-add-ben" value="3">
+    <button onclick="toggleShelbyAdvanced()" style="background:none;border:none;color:var(--text-muted);font-size:0.7rem;cursor:pointer;padding:4px 0 0;opacity:0.7;" id="shelby-advanced-toggle">+ More options (difficulty, impact, category)</button>
+  </div>
+
+  <!-- Filters — compact inline row -->
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px;">
+    <span style="font-size:0.7rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Filter:</span>
+    <select class="input" id="shelby-filter-agent" onchange="filterShelbyTasks()" style="font-size:0.74rem;padding:4px 8px;width:auto;">
+      <option value="">All Agents</option>
+      <option value="jordan">Jordan</option>
+      <option value="garves">Garves</option>
+      <option value="soren">Soren</option>
+      <option value="lisa">Lisa</option>
+      <option value="atlas">Atlas</option>
+      <option value="robotox">Robotox</option>
+      <option value="thor">Thor</option>
+      <option value="shelby">Shelby</option>
+      <option value="hawk">Hawk</option>
+      <option value="viper">Viper</option>
+      <option value="quant">Quant</option>
+    </select>
+    <select class="input" id="shelby-filter-status" onchange="filterShelbyTasks()" style="font-size:0.74rem;padding:4px 8px;width:auto;">
+      <option value="">All Status</option>
+      <option value="pending">Pending</option>
+      <option value="in_progress">In Progress</option>
+      <option value="done">Done</option>
+    </select>
+    <select class="input" id="shelby-filter-sort" onchange="filterShelbyTasks()" style="font-size:0.74rem;padding:4px 8px;width:auto;">
+      <option value="priority">By Priority</option>
+      <option value="due">By Due Date</option>
+      <option value="agent">By Agent</option>
+      <option value="created">By Created</option>
+    </select>
+    <span id="shelby-task-count" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;"></span>
+  </div>
+
+  <!-- Task List -->
+  <div class="section-spacer" style="margin-top:0;">
+    <div id="shelby-task-list"><div class="text-muted" style="padding:16px;text-align:center;">Loading tasks...</div></div>
+  </div>
+
+  <!-- Quick Dispatch -->
+  <div class="glass-card" style="margin:12px 0;border-left:3px solid #3b82f6;padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <h3 style="font-size:0.76rem;margin:0;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);">Quick Dispatch</h3>
+      <span style="font-size:0.68rem;color:var(--text-muted);opacity:0.6;">Auto-creates &amp; dispatches tasks for each routine</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="btn" onclick="triggerScheduledDispatch('dispatch_morning')" style="font-size:0.74rem;padding:6px 14px;">Morning Brief</button>
+      <button class="btn" onclick="triggerScheduledDispatch('dispatch_midday')" style="font-size:0.74rem;padding:6px 14px;">Midday Review</button>
+      <button class="btn" onclick="triggerScheduledDispatch('dispatch_evening')" style="font-size:0.74rem;padding:6px 14px;">Trading Report</button>
+      <button class="btn" onclick="triggerScheduledDispatch('dispatch_eod')" style="font-size:0.74rem;padding:6px 14px;">End of Day</button>
+    </div>
+    <div id="dispatch-schedule-result" style="font-size:0.72rem;color:#3b82f6;margin-top:6px;display:none;"></div>
+  </div>
+
+  <!-- Schedule + Assessments + Economics -->
+  <div class="section-spacer">
+    <h2 class="section-title" data-accent="shelby">Daily Schedule</h2>
+    <div class="flex flex-col gap-2" id="shelby-schedule"><div class="text-muted" style="padding:var(--space-4);">Loading schedule...</div></div>
+  </div>
+  <div class="section-spacer">
+    <h2 class="section-title" data-accent="shelby">Agent Assessment</h2>
+    <div class="grid-3" id="shelby-assessments"><div class="text-muted" style="padding:var(--space-4);">Loading assessments...</div></div>
+  </div>
+  <div class="section-spacer">
+    <h2 class="section-title" data-accent="shelby">Suggested Actions</h2>
+    <div id="shelby-smart-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;"><span class="text-muted" style="font-size:0.76rem;">Loading...</span></div>
+  </div>
+  <div class="section-spacer">
+    <h2 class="section-title" data-accent="shelby">Commands &amp; Capabilities</h2>
+    <div class="glass-card"><div id="shelby-commands" style="max-height:250px;overflow-y:auto;"><span class="text-muted">Loading commands...</span></div></div>
+  </div>
+</div>

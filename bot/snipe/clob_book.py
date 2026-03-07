@@ -78,10 +78,11 @@ def _parse_book(data: dict) -> dict:
     bids = sorted(raw_bids, key=_get_price, reverse=True)
     asks = sorted(raw_asks, key=_get_price)
 
-    def _sum_levels(levels: list, n: int = 5) -> tuple[float, float]:
-        """Sum price*size for top N levels. Returns (pressure, best_price)."""
+    def _sum_levels(levels: list, n: int = 5) -> tuple[float, float, float]:
+        """Sum price*size for top N levels. Returns (pressure, best_price, best_size)."""
         pressure = 0.0
         best = 0.0
+        best_size = 0.0
         for lvl in levels[:n]:
             if isinstance(lvl, dict):
                 p = float(lvl.get("price", 0))
@@ -93,18 +94,39 @@ def _parse_book(data: dict) -> dict:
             pressure += p * s
             if best == 0.0:
                 best = p
-        return pressure, best
+                best_size = s
+        return pressure, best, best_size
 
-    buy_pressure, best_bid = _sum_levels(bids)
-    sell_pressure, best_ask = _sum_levels(asks)
+    buy_pressure, best_bid, best_bid_size = _sum_levels(bids)
+    sell_pressure, best_ask, best_ask_size = _sum_levels(asks)
     spread = best_ask - best_bid if best_bid > 0 and best_ask > 0 else 0.0
+
+    # BUG FIX #39: Cumulative depth must check len >= 2 for list/tuple levels,
+    # matching _sum_levels() which already checks this. Without the length check,
+    # a malformed level like [0.5] (single element) would crash with IndexError.
+    ask_depth_cumulative = sum(
+        float(lvl.get("size", 0)) if isinstance(lvl, dict)
+        else float(lvl[1]) if isinstance(lvl, (list, tuple)) and len(lvl) >= 2
+        else 0.0
+        for lvl in asks[:5]
+    )
+    bid_depth_cumulative = sum(
+        float(lvl.get("size", 0)) if isinstance(lvl, dict)
+        else float(lvl[1]) if isinstance(lvl, (list, tuple)) and len(lvl) >= 2
+        else 0.0
+        for lvl in bids[:5]
+    )
 
     return {
         "buy_pressure": buy_pressure,
         "sell_pressure": sell_pressure,
         "best_bid": best_bid,
+        "best_bid_size": best_bid_size,
         "best_ask": best_ask,
+        "best_ask_size": best_ask_size,
         "spread": spread,
+        "ask_depth_cumulative": ask_depth_cumulative,
+        "bid_depth_cumulative": bid_depth_cumulative,
     }
 
 
@@ -115,6 +137,13 @@ def get_orderbook(token_id: str) -> dict | None:
     Uses 5s REST cache. Returns None if unavailable.
     """
     now = time.time()
+
+    # BUG FIX #37: Prune stale cache entries to prevent unbounded memory growth.
+    # Each token_id holds a parsed book dict; over days of running with many
+    # 5m windows, thousands of entries accumulate and never get evicted.
+    _stale = [k for k, (ts, _) in _cache.items() if now - ts > 120]
+    for k in _stale:
+        del _cache[k]
 
     # Check cache
     if token_id in _cache:

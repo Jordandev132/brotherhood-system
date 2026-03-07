@@ -51,7 +51,7 @@ async fn main() {
         .route("/health", get(handle_health))
         .with_state(state);
 
-    let addr = "0.0.0.0:9999";
+    let addr = "127.0.0.1:9999";
     info!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr)
         .await

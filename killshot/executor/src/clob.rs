@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde_json::Value;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::auth::build_l2_headers;
 use crate::config::Config;
@@ -38,7 +38,7 @@ pub async fn post_order(
             let text = resp.text().await.unwrap_or_default();
             let total_latency = start.elapsed().as_millis() as u64;
 
-            info!("CLOB response ({status_code}): {}", truncate(&text, 500));
+            debug!("CLOB response ({status_code}): {text}");
 
             if !status_code.is_success() {
                 return ClobResult {
@@ -99,7 +99,7 @@ pub async fn post_orders_batch(
             let text = resp.text().await.unwrap_or_default();
             let total_latency = start.elapsed().as_millis() as u64;
 
-            info!("CLOB batch response ({status_code}): {}", truncate(&text, 500));
+            debug!("CLOB batch response ({status_code}): {text}");
 
             if !status_code.is_success() {
                 return BatchClobResult {
@@ -190,7 +190,12 @@ fn parse_clob_response(text: &str, latency_ms: u64) -> ClobResult {
     // Calculate avg_price from matched orders if available
     let (avg_price, total_shares) = extract_matched_info(&v);
 
-    let success = !order_id.is_empty();
+    // BUG FIX: Check both orderID presence AND status is a fill.
+    // FOK that gets acknowledged but not filled could have orderID with cancelled status.
+    let success = !order_id.is_empty()
+        && status != "cancelled"
+        && status != "expired"
+        && status != "rejected";
 
     ClobResult {
         success,

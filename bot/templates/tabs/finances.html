@@ -1,0 +1,256 @@
+<!-- Finances — Brotherhood Financial Tracker -->
+<div class="tab-content" id="tab-finances">
+
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+    <h2 style="margin:0;font-size:1.1rem;font-weight:700;">Brotherhood Finances</h2>
+    <span id="fin-month" style="font-size:0.8rem;font-weight:600;color:#F59E0B;"></span>
+    <button class="btn" onclick="financeRefresh()" style="font-size:0.72rem;font-weight:700;border-color:#F59E0B;color:#F59E0B;">Refresh</button>
+    <span class="text-muted" style="font-size:0.68rem;margin-left:auto;">Updated: <span id="fin-updated">--</span></span>
+  </div>
+
+  <!-- Summary Cards -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
+    <div class="glass-card" style="text-align:center;padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;">Total Costs</div>
+      <div id="fin-total-costs" style="font-size:1.4rem;font-weight:800;font-family:var(--font-mono);color:var(--error);">$0.00</div>
+    </div>
+    <div class="glass-card" style="text-align:center;padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;">Revenue</div>
+      <div id="fin-revenue" style="font-size:1.4rem;font-weight:800;font-family:var(--font-mono);color:var(--success);">$0.00</div>
+    </div>
+    <div class="glass-card" style="text-align:center;padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;">Net P/L</div>
+      <div id="fin-net" style="font-size:1.4rem;font-weight:800;font-family:var(--font-mono);">$0.00</div>
+    </div>
+    <div class="glass-card" style="text-align:center;padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;">Active Subs</div>
+      <div id="fin-active-subs" style="font-size:1.4rem;font-weight:800;font-family:var(--font-mono);">0</div>
+    </div>
+  </div>
+
+  <!-- Cost Breakdown Cards -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+    <div class="glass-card" style="padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Subscriptions/mo</div>
+      <div id="fin-subs-cost" style="font-size:1.1rem;font-weight:700;font-family:var(--font-mono);color:var(--error);">$0.00</div>
+    </div>
+    <div class="glass-card" style="padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">API Costs MTD</div>
+      <div id="fin-api-cost" style="font-size:1.1rem;font-weight:700;font-family:var(--font-mono);color:var(--error);">$0.00</div>
+    </div>
+    <div class="glass-card" style="padding:12px;">
+      <div class="text-muted" style="font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">One-Time MTD</div>
+      <div id="fin-onetime-cost" style="font-size:1.1rem;font-weight:700;font-family:var(--font-mono);color:var(--error);">$0.00</div>
+    </div>
+  </div>
+
+  <!-- Subscriptions Table -->
+  <div class="glass-card" style="padding:14px;margin-bottom:16px;">
+    <div style="font-weight:700;font-size:0.82rem;margin-bottom:10px;">Subscriptions</div>
+    <table style="width:100%;font-size:0.74rem;border-collapse:collapse;">
+      <thead>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Name</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Project</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">Cost</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:600;">Cycle</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:600;">Next Billing</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:600;">Status</th>
+        </tr>
+      </thead>
+      <tbody id="fin-subs-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Upcoming Renewals + Alerts Row -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+    <div class="glass-card" style="padding:14px;">
+      <div style="font-weight:700;font-size:0.82rem;margin-bottom:10px;">Upcoming Renewals (7 days)</div>
+      <div id="fin-renewals" style="font-size:0.74rem;"><span class="text-muted">None</span></div>
+    </div>
+    <div class="glass-card" style="padding:14px;">
+      <div style="font-weight:700;font-size:0.82rem;margin-bottom:10px;">Alerts</div>
+      <div id="fin-alerts" style="font-size:0.74rem;"><span class="text-muted">No alerts</span></div>
+    </div>
+  </div>
+
+  <!-- By Project Breakdown -->
+  <div class="glass-card" style="padding:14px;margin-bottom:16px;">
+    <div style="font-weight:700;font-size:0.82rem;margin-bottom:10px;">By Project</div>
+    <div id="fin-by-project" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
+  </div>
+
+  <!-- Revenue Table -->
+  <div class="glass-card" style="padding:14px;margin-bottom:16px;">
+    <div style="font-weight:700;font-size:0.82rem;margin-bottom:10px;">Revenue</div>
+    <table style="width:100%;font-size:0.74rem;border-collapse:collapse;">
+      <thead>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Source</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Project</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Client</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">Amount</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:600;">Date</th>
+        </tr>
+      </thead>
+      <tbody id="fin-rev-tbody"></tbody>
+    </table>
+    <div id="fin-no-rev" class="text-muted" style="font-size:0.72rem;padding:8px;display:none;">No revenue recorded yet.</div>
+  </div>
+
+  <!-- API Costs Table -->
+  <div class="glass-card" style="padding:14px;">
+    <div style="font-weight:700;font-size:0.82rem;margin-bottom:10px;">API Costs (Recent)</div>
+    <table style="width:100%;font-size:0.74rem;border-collapse:collapse;">
+      <thead>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Service</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Project</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">Amount</th>
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">Details</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:600;">Date</th>
+        </tr>
+      </thead>
+      <tbody id="fin-api-tbody"></tbody>
+    </table>
+    <div id="fin-no-api" class="text-muted" style="font-size:0.72rem;padding:8px;display:none;">No API costs recorded yet.</div>
+  </div>
+
+</div>
+
+<script>
+function financeRefresh() {
+  fetch('/api/finances').then(function(r) { return r.json(); }).then(function(d) {
+    var s = d.summary || {};
+    var net = s.net || 0;
+
+    // Header
+    document.getElementById('fin-month').textContent = s.month || '';
+    document.getElementById('fin-updated').textContent = d.updated_at ? d.updated_at.slice(0, 19) : '--';
+
+    // Summary cards
+    document.getElementById('fin-total-costs').textContent = '$' + (s.total_costs || 0).toFixed(2);
+    document.getElementById('fin-revenue').textContent = '$' + (s.total_revenue || 0).toFixed(2);
+    var netEl = document.getElementById('fin-net');
+    netEl.textContent = '$' + net.toFixed(2);
+    netEl.style.color = net >= 0 ? 'var(--success)' : 'var(--error)';
+
+    var activeSubs = (d.subscriptions || []).filter(function(x) { return x.status === 'active'; });
+    document.getElementById('fin-active-subs').textContent = activeSubs.length;
+
+    // Cost breakdown
+    document.getElementById('fin-subs-cost').textContent = '$' + (s.total_subscriptions || 0).toFixed(2);
+    document.getElementById('fin-api-cost').textContent = '$' + (s.total_api || 0).toFixed(2);
+    document.getElementById('fin-onetime-cost').textContent = '$' + (s.total_one_time || 0).toFixed(2);
+
+    // Subscriptions table
+    var tbody = document.getElementById('fin-subs-tbody');
+    tbody.innerHTML = '';
+    (d.subscriptions || []).forEach(function(sub) {
+      var costStr = sub.cost > 0 ? ('$' + sub.cost.toFixed(2)) : 'FREE';
+      var statusBg = sub.status === 'active' ? 'var(--success)' : 'var(--error)';
+      var projColors = {soren:'#E879F9',brotherhood:'#60A5FA',agency:'#34D399',max:'#FBBF24'};
+      var projBg = projColors[sub.project] || '#94A3B8';
+      var tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+      tr.innerHTML = '<td style="padding:6px 8px;">' + sub.name + '</td>'
+        + '<td style="padding:6px 8px;"><span style="background:' + projBg + ';color:#000;padding:1px 6px;border-radius:3px;font-size:0.64rem;font-weight:700;">' + sub.project + '</span></td>'
+        + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:600;">' + costStr + '</td>'
+        + '<td style="padding:6px 8px;text-align:center;">' + (sub.billing_cycle || '-') + '</td>'
+        + '<td style="padding:6px 8px;text-align:center;">' + (sub.next_billing || '-') + '</td>'
+        + '<td style="padding:6px 8px;text-align:center;"><span style="background:' + statusBg + ';color:#000;padding:1px 6px;border-radius:3px;font-size:0.62rem;font-weight:700;">' + sub.status + '</span></td>';
+      tbody.appendChild(tr);
+    });
+
+    // Upcoming renewals
+    var renEl = document.getElementById('fin-renewals');
+    var renewals = d.upcoming_renewals || [];
+    if (renewals.length === 0) {
+      renEl.innerHTML = '<span class="text-muted">None upcoming</span>';
+    } else {
+      renEl.innerHTML = renewals.map(function(r) {
+        return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">'
+          + '<span>' + r.name + '</span>'
+          + '<span style="font-family:var(--font-mono);font-weight:600;color:#F59E0B;">$' + r.cost.toFixed(2) + ' in ' + r.days_until + 'd</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    // Alerts
+    var alertEl = document.getElementById('fin-alerts');
+    var alerts = d.alerts || [];
+    if (alerts.length === 0) {
+      alertEl.innerHTML = '<span class="text-muted">No alerts</span>';
+    } else {
+      alertEl.innerHTML = alerts.map(function(a) {
+        return '<div style="padding:4px 0;color:#F59E0B;">&#9888; ' + a + '</div>';
+      }).join('');
+    }
+
+    // By project
+    var projEl = document.getElementById('fin-by-project');
+    var bp = s.by_project || {};
+    var projKeys = Object.keys(bp).sort();
+    if (projKeys.length === 0) {
+      projEl.innerHTML = '<span class="text-muted">No data</span>';
+    } else {
+      projEl.innerHTML = projKeys.map(function(k) {
+        var v = bp[k];
+        var netColor = v.net >= 0 ? 'var(--success)' : 'var(--error)';
+        var projColors = {soren:'#E879F9',brotherhood:'#60A5FA',agency:'#34D399',max:'#FBBF24'};
+        var border = projColors[k] || '#94A3B8';
+        return '<div style="border-left:3px solid ' + border + ';padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:4px;">'
+          + '<div style="font-weight:700;font-size:0.76rem;margin-bottom:4px;">' + k.toUpperCase() + '</div>'
+          + '<div style="font-size:0.7rem;">Costs: <span style="color:var(--error);font-family:var(--font-mono);">$' + v.costs.toFixed(2) + '</span></div>'
+          + '<div style="font-size:0.7rem;">Revenue: <span style="color:var(--success);font-family:var(--font-mono);">$' + v.revenue.toFixed(2) + '</span></div>'
+          + '<div style="font-size:0.7rem;">Net: <span style="color:' + netColor + ';font-weight:700;font-family:var(--font-mono);">$' + v.net.toFixed(2) + '</span></div>'
+          + '</div>';
+      }).join('');
+    }
+
+    // Revenue table
+    var revTbody = document.getElementById('fin-rev-tbody');
+    var noRev = document.getElementById('fin-no-rev');
+    revTbody.innerHTML = '';
+    var revItems = d.revenue || [];
+    if (revItems.length === 0) {
+      noRev.style.display = 'block';
+    } else {
+      noRev.style.display = 'none';
+      revItems.slice(-20).reverse().forEach(function(r) {
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+        tr.innerHTML = '<td style="padding:6px 8px;">' + r.source + '</td>'
+          + '<td style="padding:6px 8px;">' + (r.project || '-') + '</td>'
+          + '<td style="padding:6px 8px;">' + (r.client || '-') + '</td>'
+          + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--success);">$' + (r.amount || 0).toFixed(2) + '</td>'
+          + '<td style="padding:6px 8px;text-align:center;">' + (r.date || '-') + '</td>';
+        revTbody.appendChild(tr);
+      });
+    }
+
+    // API costs table
+    var apiTbody = document.getElementById('fin-api-tbody');
+    var noApi = document.getElementById('fin-no-api');
+    apiTbody.innerHTML = '';
+    var apiItems = d.api_costs || [];
+    if (apiItems.length === 0) {
+      noApi.style.display = 'block';
+    } else {
+      noApi.style.display = 'none';
+      apiItems.slice(-20).reverse().forEach(function(c) {
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+        tr.innerHTML = '<td style="padding:6px 8px;">' + c.service + '</td>'
+          + '<td style="padding:6px 8px;">' + (c.project || '-') + '</td>'
+          + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--error);">$' + (c.amount || 0).toFixed(4) + '</td>'
+          + '<td style="padding:6px 8px;">' + (c.details || '-') + '</td>'
+          + '<td style="padding:6px 8px;text-align:center;">' + (c.date || '-') + '</td>';
+        apiTbody.appendChild(tr);
+      });
+    }
+  }).catch(function(e) {
+    console.error('Finance refresh failed:', e);
+  });
+}
+</script>

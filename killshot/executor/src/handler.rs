@@ -29,7 +29,7 @@ pub struct OrderRequest {
 }
 
 fn default_neg_risk() -> bool {
-    false
+    true
 }
 
 #[derive(Serialize)]
@@ -76,6 +76,7 @@ pub async fn handle_order(
         req.size,
         &req.side,
         req.neg_risk,
+        &req.order_type,
     )
     .await;
 
@@ -149,6 +150,7 @@ pub async fn handle_orders(
             req.size,
             &req.side,
             req.neg_risk,
+            &req.order_type,
         )
         .await;
         clob_jsons.push(order_to_clob_json(&signed, &state.config.api_key, &req.order_type));
