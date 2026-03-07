@@ -10,7 +10,6 @@ Usage:
     feed = ChainlinkWS()
     feed.start()
     price = feed.get_price("bitcoin")  # -> 65432.10
-    vol = feed.get_volatility("bitcoin")  # -> 0.0003 (rolling 5min stdev/price)
 """
 from __future__ import annotations
 
@@ -19,7 +18,6 @@ import json
 import logging
 import threading
 import time
-from collections import deque
 from typing import Optional
 
 import websockets
@@ -47,8 +45,6 @@ class ChainlinkWS:
         self._connected = False
         self._update_count = 0
         self._thread: Optional[threading.Thread] = None
-        # Phase 3b: Rolling price history for volatility calculation
-        self._price_history: dict[str, deque] = {}
 
     def get_price(self, asset: str) -> Optional[float]:
         """Get latest Chainlink price. Returns None if no data yet."""
@@ -60,30 +56,6 @@ class ChainlinkWS:
         if ts is None:
             return float("inf")
         return time.time() - ts
-
-    def get_volatility(self, asset: str) -> Optional[float]:
-        """Get rolling 5-minute price standard deviation as fraction of price.
-
-        Returns None if insufficient data (< 30 data points).
-        Used by Phase 3b volatility-adaptive threshold.
-        """
-        asset = asset.lower()
-        history = self._price_history.get(asset)
-        if not history or len(history) < 30:
-            return None
-
-        cutoff = time.time() - 300  # 5 minutes
-        recent = [p for ts, p in history if ts >= cutoff]
-        if len(recent) < 10:
-            return None
-
-        mean = sum(recent) / len(recent)
-        if mean <= 0:
-            return None
-
-        variance = sum((p - mean) ** 2 for p in recent) / len(recent)
-        stdev = variance ** 0.5
-        return stdev / mean  # Return as fraction of price
 
     def start(self) -> None:
         """Start the WebSocket feed in a daemon thread."""
@@ -177,16 +149,9 @@ class ChainlinkWS:
             if asset:
                 try:
                     price = float(value)
-                    now = time.time()
                     self._prices[asset] = price
-                    self._timestamps[asset] = now
+                    self._timestamps[asset] = time.time()
                     self._update_count += 1
-
-                    # Phase 3b: Append to price history for volatility
-                    if asset not in self._price_history:
-                        self._price_history[asset] = deque(maxlen=300)
-                    self._price_history[asset].append((now, price))
-
                     if self._update_count <= 3 or self._update_count % 100 == 0:
                         log.info(
                             "[CHAINLINK-WS] %s $%.2f (update #%d)",
@@ -197,17 +162,11 @@ class ChainlinkWS:
             return
 
         # Historical batch format (initial burst): payload.data[]
+        # BUG FIX #24: Batch data lacks symbol metadata — the old heuristic
+        # (price > 10000 = BTC) misattributed ETH and dropped SOL/XRP entirely.
+        # Skip batch processing: real-time updates with explicit symbols arrive
+        # within seconds and are the source of truth.
         data = payload.get("data", [])
         if data and isinstance(data, list):
-            latest = data[-1]
-            batch_value = latest.get("value")
-            if batch_value is not None:
-                try:
-                    price = float(batch_value)
-                    # Assume BTC if price > 10000
-                    if price > 10000:
-                        self._prices["bitcoin"] = price
-                        self._timestamps["bitcoin"] = time.time()
-                        log.info("[CHAINLINK-WS] BTC $%.2f (from batch of %d)", price, len(data))
-                except (ValueError, TypeError):
-                    pass
+            log.debug("[CHAINLINK-WS] Ignoring historical batch (%d points) — "
+                      "waiting for real-time updates with symbols", len(data))

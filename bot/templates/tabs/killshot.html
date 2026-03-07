@@ -1,0 +1,74 @@
+<!-- KILLSHOT — BTC 5m Spread Capture -->
+<div class="tab-content" id="tab-killshot">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+    <h2 style="margin:0;font-size:1.1rem;font-weight:700;">Killshot &mdash; BTC 5m Spread Capture</h2>
+    <span id="ks-mode-badge" class="trading-mode-badge trading-mode-paper">Trading: Paper Money</span>
+    <button class="btn" onclick="ksRefresh()" style="font-size:0.72rem;font-weight:700;border-color:#ef4444;color:#ef4444;margin-left:auto;">Refresh</button>
+    <span class="text-muted" style="font-size:0.68rem;">Updated: <span id="ks-updated">--</span></span>
+  </div>
+
+  <!-- Hero Cards -->
+  <div class="grid-4" style="margin-bottom:12px;">
+    <div class="stat-card" data-accent="error">
+      <div class="stat-value" id="ks-daily-pnl" style="font-size:1.4rem;color:#ef4444;">$0.00</div>
+      <div class="stat-label">Daily P&amp;L</div>
+      <div class="text-muted" style="font-size:0.65rem;margin-top:4px;"><span id="ks-daily-trades">0</span> trades &bull; <span id="ks-daily-wr">0</span>% WR</div>
+    </div>
+    <div class="stat-card" data-accent="error">
+      <div class="stat-value" id="ks-session-pnl" style="font-size:1.4rem;">$0.00</div>
+      <div class="stat-label">Session P&amp;L</div>
+      <div class="text-muted" style="font-size:0.65rem;margin-top:4px;"><span id="ks-session-trades">0</span> trades &bull; <span id="ks-session-wr">0</span>% WR</div>
+    </div>
+    <div class="stat-card" data-accent="error">
+      <div class="stat-value" id="ks-total-pnl" style="font-size:1.4rem;">$0.00</div>
+      <div class="stat-label">All-Time P&amp;L</div>
+      <div class="text-muted" style="font-size:0.65rem;margin-top:4px;"><span id="ks-total-trades">0</span> trades &bull; <span id="ks-total-wr">0</span>% WR</div>
+    </div>
+    <div class="stat-card" data-accent="error">
+      <div class="stat-value" id="ks-pending-count" style="font-size:1.4rem;">0</div>
+      <div class="stat-label">Pending</div>
+      <div class="text-muted" style="font-size:0.65rem;margin-top:4px;">Avg entry: <span id="ks-avg-entry">--</span></div>
+    </div>
+  </div>
+
+  <!-- Spread Stats -->
+  <div class="glass-card" style="margin-bottom:12px;border-left:3px solid #ef4444;">
+    <h3 class="section-title" style="font-size:0.72rem;margin-bottom:var(--space-2);text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);">Spread Performance</h3>
+    <div class="grid-5" style="margin-bottom:0;">
+      <div class="stat-card" data-accent="error"><div class="stat-value" id="ks-spr-trades" style="font-size:0.95rem;color:#ef4444;">0</div><div class="stat-label">Trades</div></div>
+      <div class="stat-card" data-accent="error"><div class="stat-value" id="ks-spr-wins">0</div><div class="stat-label">Wins</div></div>
+      <div class="stat-card" data-accent="error"><div class="stat-value" id="ks-spr-losses">0</div><div class="stat-label">Losses</div></div>
+      <div class="stat-card" data-accent="error"><div class="stat-value" id="ks-spr-wr">0%</div><div class="stat-label">Win Rate</div></div>
+      <div class="stat-card" data-accent="error"><div class="stat-value" id="ks-spr-pnl">$0.00</div><div class="stat-label">Spread P&amp;L</div></div>
+    </div>
+  </div>
+
+  <!-- Pending Trades -->
+  <div class="collapse-section default-open">
+    <div class="collapse-trigger">
+      <h2 class="section-title" data-accent="error" style="margin-bottom:0;">Pending Trades <span id="ks-pending-badge" style="font-size:0.56rem;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;color:#ef4444;">0</span></h2>
+    </div>
+    <div class="collapse-body">
+      <table class="data-table">
+        <thead><tr><th>Asset</th><th>Direction</th><th>Entry</th><th>Size</th><th>Remaining</th></tr></thead>
+        <tbody id="ks-pending-tbody"><tr><td colspan="5" class="text-muted" style="text-align:center;">No pending trades</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Recent Trades -->
+  <div class="collapse-section default-open">
+    <div class="collapse-trigger">
+      <h2 class="section-title" data-accent="error" style="margin-bottom:0;">Recent Trades <span id="ks-trades-badge" style="font-size:0.56rem;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;color:#ef4444;">0</span></h2>
+    </div>
+    <div class="collapse-body">
+      <table class="data-table">
+        <thead><tr><th>Time</th><th>Asset</th><th>Strategy</th><th>Direction</th><th>Entry</th><th>Size</th><th>Outcome</th><th>P&amp;L</th></tr></thead>
+        <tbody id="ks-trades-tbody"><tr><td colspan="8" class="text-muted" style="text-align:center;">No trades yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>

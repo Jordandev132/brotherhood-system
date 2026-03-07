@@ -35,11 +35,13 @@ class ClobWS:
     on disconnect. Thread-safe — get_book() can be called from any thread.
     """
 
-    def __init__(self):
+    def __init__(self, on_book_update=None):
         self._books: dict[str, dict] = {}        # token_id -> parsed book
         self._book_ts: dict[str, float] = {}     # token_id -> last update time
         self._subscribed: set[str] = set()        # currently subscribed
         self._pending_subs: set[str] = set()      # subscribe on (re)connect
+        # BUG FIX #21: lock guards _subscribed and _pending_subs (cross-thread access)
+        self._sub_lock = threading.Lock()
         self._running = False
         self._connected = False
         self._ws = None
@@ -47,6 +49,7 @@ class ClobWS:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._update_count = 0
         self._last_msg_at = 0.0
+        self._on_book_update = on_book_update     # Callable[[str, dict], None] or None
 
     # ── Public API ────────────────────────────────────────────
 
@@ -67,15 +70,15 @@ class ClobWS:
 
     def subscribe(self, token_id: str) -> None:
         """Subscribe to orderbook updates for a token."""
-        if token_id in self._subscribed:
-            return
-        self._pending_subs.add(token_id)
-        if self._connected and self._loop:
-            # Must resend ALL tokens — WS replaces subscription on each message
-            all_desired = self._subscribed | self._pending_subs
-            asyncio.run_coroutine_threadsafe(
-                self._send_subscribe(all_desired), self._loop,
-            )
+        with self._sub_lock:
+            if token_id in self._subscribed:
+                return
+            self._pending_subs.add(token_id)
+            if self._connected and self._loop:
+                all_desired = self._subscribed | self._pending_subs
+                asyncio.run_coroutine_threadsafe(
+                    self._send_subscribe(all_desired), self._loop,
+                )
 
     def update_subscriptions(self, token_ids: set[str]) -> None:
         """Update subscription set. Sends ALL desired tokens in one batch.
@@ -83,15 +86,16 @@ class ClobWS:
         Polymarket WS uses replacement semantics — each 'type: market' message
         replaces the entire subscription. Must send all tokens in one message.
         """
-        new_tokens = token_ids - self._subscribed
-        if not new_tokens:
-            return
-        self._pending_subs.update(new_tokens)
-        all_desired = self._subscribed | self._pending_subs
-        if self._connected and self._loop:
-            asyncio.run_coroutine_threadsafe(
-                self._send_subscribe(all_desired), self._loop,
-            )
+        with self._sub_lock:
+            new_tokens = token_ids - self._subscribed
+            if not new_tokens:
+                return
+            self._pending_subs.update(new_tokens)
+            all_desired = self._subscribed | self._pending_subs
+            if self._connected and self._loop:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_subscribe(all_desired), self._loop,
+                )
 
     @property
     def is_connected(self) -> bool:
@@ -147,7 +151,8 @@ class ClobWS:
                 log.info("[CLOB-WS] Connected to %s", WS_URL[:60])
 
                 # Re-subscribe all known tokens on (re)connect
-                all_tokens = self._subscribed | self._pending_subs
+                with self._sub_lock:
+                    all_tokens = self._subscribed | self._pending_subs
                 if all_tokens:
                     await self._send_subscribe(all_tokens)
 
@@ -184,8 +189,9 @@ class ClobWS:
                 "assets_ids": tokens,
             })
             await self._ws.send(msg)
-            self._subscribed.update(tokens)
-            self._pending_subs -= set(tokens)
+            with self._sub_lock:
+                self._subscribed.update(tokens)
+                self._pending_subs -= set(tokens)
             log.info("[CLOB-WS] Subscribed to %d tokens (batch)", len(tokens))
         except Exception as e:
             log.warning("[CLOB-WS] Subscribe error: %s", str(e)[:80])
@@ -239,20 +245,43 @@ class ClobWS:
             parsed_asks = [(p, s) for p, s in parsed_asks if p > 0]
 
             best_bid = parsed_bids[0][0] if parsed_bids else 0.0
+            best_bid_size = parsed_bids[0][1] if parsed_bids else 0.0
             best_ask = parsed_asks[0][0] if parsed_asks else 0.0
+            best_ask_size = parsed_asks[0][1] if parsed_asks else 0.0
             buy_pressure = sum(p * s for p, s in parsed_bids[:5])
             sell_pressure = sum(p * s for p, s in parsed_asks[:5])
             spread = best_ask - best_bid if best_bid > 0 and best_ask > 0 else 0.0
 
+            # Cumulative depth: sum of sizes at top N ask/bid levels
+            ask_depth_cumulative = sum(s for _, s in parsed_asks[:5])
+            bid_depth_cumulative = sum(s for _, s in parsed_bids[:5])
+
+            # Full ask/bid ladders (top 5) for per-leg fillability checks
+            ask_ladder = [(p, s) for p, s in parsed_asks[:5]]
+            bid_ladder = [(p, s) for p, s in parsed_bids[:5]]
+
             self._books[token_id] = {
                 "best_bid": best_bid,
+                "best_bid_size": best_bid_size,
                 "best_ask": best_ask,
+                "best_ask_size": best_ask_size,
                 "buy_pressure": buy_pressure,
                 "sell_pressure": sell_pressure,
                 "spread": spread,
+                "ask_depth_cumulative": ask_depth_cumulative,
+                "bid_depth_cumulative": bid_depth_cumulative,
+                "ask_ladder": ask_ladder,
+                "bid_ladder": bid_ladder,
             }
             self._book_ts[token_id] = time.time()
             self._update_count += 1
+
+            # Fire event-driven callback (spread detection on book update)
+            if self._on_book_update:
+                try:
+                    self._on_book_update(token_id, self._books[token_id])
+                except Exception as cb_err:
+                    log.debug("[CLOB-WS] book callback error: %s", str(cb_err)[:80])
 
             if self._update_count <= 3 or self._update_count % 500 == 0:
                 log.info(

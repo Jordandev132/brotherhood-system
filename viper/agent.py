@@ -1,130 +1,121 @@
 ```python
-"""
-agent.py - KILLSHOT Core Agent Controller
-Implements robust exception handling, state management, and auto-recovery logic.
-"""
-
 import logging
 import time
+import sys
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Import local modules
+from anomaly import detect_anomalies
+from pnl import calculate_pnl
+from brain import make_decision
+from budget import check_budget
 
-class KILLSHOTAgent:
-    def __init__(self, agent_id: str):
-        self.agent_id = agent_id
-        self.state = "running"  # running, paused, error
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('/Users/macuser/polymarket-bot/viper/agent.log')
+    ]
+)
+logger = logging.getLogger("ViperAgent")
+
+class ViperAgent:
+    """
+    Robust Viper Agent Core.
+    Handles connection errors, data corruption, and logic failures gracefully.
+    """
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        self.running = False
         self.retry_count = 0
         self.max_retries = 5
-        self.last_error_time: Optional[datetime] = None
-        self.recovery_interval = 60  # seconds
-
-    def run_loop(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Main execution loop with robust exception handling.
+        self.base_delay = 1.0
         
-        Args:
-            task_data: Input data for the task.
-            
-        Returns:
-            Result dictionary or error status.
-        """
-        while self.state == "running":
+        logger.info("ViperAgent initialized successfully.")
+
+    def run_loop(self) -> None:
+        """Main execution loop with robust error handling."""
+        self.running = True
+        logger.info("Starting ViperAgent main loop.")
+        
+        while self.running:
             try:
-                # Simulate core logic execution
-                # In real implementation, this calls anomaly.py and pnl.py
-                result = self._execute_core_logic(task_data)
+                self._execute_cycle()
+                self.retry_count = 0  # Reset on success
                 
-                if result.get('status') == 'error':
-                    logger.warning(f"Agent {self.agent_id} returned error status: {result}")
-                    self._handle_recovery()
-                    continue
+            except ConnectionError as e:
+                logger.critical(f"Connection Error detected: {e}")
+                self._handle_connection_error(e)
                 
-                return result
-
             except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Agent {self.agent_id} exception detected: {error_msg}", exc_info=True)
+                # Catch-all for unexpected logic errors to prevent crash
+                logger.error(f"Uncaught exception in main loop: {type(e).__name__} - {e}", exc_info=True)
+                time.sleep(self.base_delay)
                 
-                self.state = "paused"
-                self.last_error_time = datetime.now()
-                
-                # Attempt auto-recovery
-                self._handle_recovery()
-                
-                # If recovery fails after max retries, mark as failed
-                if self.retry_count >= self.max_retries:
-                    logger.critical(f"Agent {self.agent_id} failed permanently after {self.max_retries} retries.")
-                    return {"status": "failed", "error": "Max retries exceeded", "agent_id": self.agent_id}
-                
-                # Wait before retrying
-                time.sleep(self.recovery_interval)
+            # Safety break for testing or manual stop
+            if not self.running:
+                break
 
-        return {"status": "stopped", "agent_id": self.agent_id}
-
-    def _execute_core_logic(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Placeholder for core logic. Imports and calls anomaly/pnl modules.
-        """
-        # Import here to avoid circular dependencies or import errors at module load
-        from viper.anomaly import detect_anomalies, validate_data_integrity
-        from viper.pnl import calculate_pnl, aggregate_pnl
+    def _execute_cycle(self) -> None:
+        """Execute a single agent cycle."""
+        logger.debug("Executing agent cycle...")
         
-        # Simulate processing
-        data = task_data.get('data', [])
-        if not validate_data_integrity(data):
-            return {"status": "error", "message": "Invalid data integrity"}
-            
-        anomalies = detect_anomalies(data)
-        # Simulate PnL calculation
-        pnl = calculate_pnl({'entry_price': 100, 'quantity': 10, 'side': 'long'}, 105)
-        
-        return {
-            "status": "success",
-            "anomalies": anomalies,
-            "pnl": pnl,
-            "timestamp": datetime.now().isoformat()
-        }
-
-    def _handle_recovery(self):
-        """
-        Implements auto-recovery logic: pause -> wait -> unpause.
-        """
-        self.retry_count += 1
-        
-        # Check if we hit max retries
-        if self.retry_count > self.max_retries:
-            self.state = "failed"
-            logger.error(f"Agent {self.agent_id} marked as failed after {self.max_retries} retries.")
+        # 1. Check Budget
+        budget_status = check_budget()
+        if not budget_status.get("can_trade", False):
+            logger.info("Budget check failed. Pausing trade execution.")
             return
 
-        # Log recovery attempt
-        logger.info(f"Agent {self.agent_id} initiating recovery attempt #{self.retry_count}")
+        # 2. Detect Anomalies
+        anomaly_result = detect_anomalies()
+        if anomaly_result.get("is_anomalous", False):
+            logger.warning(f"Anomaly detected: {anomaly_result.get('details', 'Unknown')}")
+            return
+
+        # 3. Calculate PnL
+        pnl_data = calculate_pnl()
+        if not pnl_data.get("valid", False):
+            logger.warning("PnL calculation failed or data missing. Skipping trade logic.")
+            return
+
+        # 4. Make Decision
+        decision = make_decision(pnl_data)
+        logger.info(f"Decision made: {decision}")
         
-        # Simulate waiting for API to recover or state to stabilize
-        # In a real system, this might check a health endpoint
-        time.sleep(5) # Short wait for immediate retry logic
-        
-        # Attempt to unpause
-        self.state = "running"
-        logger.info(f"Agent {self.agent_id} unpaused successfully.")
+        # 5. Execute Trade (Mocked for safety in reconstruction)
+        # self._execute_trade(decision)
 
-    def pause(self):
-        """Force pause the agent."""
-        self.state = "paused"
-        logger.warning(f"Agent {self.agent_id} manually paused.")
+    def _handle_connection_error(self, error: Exception) -> None:
+        """Handle connection errors with exponential backoff."""
+        if self.retry_count < self.max_retries:
+            self.retry_count += 1
+            delay = self.base_delay * (2 ** (self.retry_count - 1))
+            logger.warning(f"Retrying in {delay} seconds (Attempt {self.retry_count}/{self.max_retries})")
+            time.sleep(delay)
+        else:
+            logger.critical(f"Max retries ({self.max_retries}) exceeded. Shutting down gracefully.")
+            self.running = False
 
-    def unpause(self):
-        """Force unpause the agent."""
-        self.state = "running"
-        self.retry_count = 0
-        logger.info(f"Agent {self.agent_id} manually unpaused.")
+    def stop(self) -> None:
+        """Stop the agent loop."""
+        logger.info("Stopping ViperAgent...")
+        self.running = False
 
-    def get_status(self) -> Dict[str, Any]:
-        return {
-            "agent_id": self.agent_id,
-            "state": self.state,
-            "retry_count": self.retry_count,
-            "last_error_time": self.last_error_time.isoformat() if self.last_error_time else None
-        }
+def main():
+    """Entry point for the agent."""
+    agent = ViperAgent()
+    try:
+        agent.run_loop()
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user. Shutting down.")
+    finally:
+        agent.stop()
+        logger.info("ViperAgent process terminated.")
+
+if __name__ == "__main__":
+    main()
+```

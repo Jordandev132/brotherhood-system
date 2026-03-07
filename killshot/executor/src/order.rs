@@ -212,6 +212,7 @@ pub async fn build_and_sign_order(
     size: f64,
     side: &str,
     neg_risk: bool,
+    order_type: &str,
 ) -> SignedOrderResult {
     let (side_int, maker_amount, taker_amount) =
         get_order_amounts(side, size, price, &config.tick_size);
@@ -236,7 +237,7 @@ pub async fn build_and_sign_order(
         takerAmount: U256::from(taker_amount),
         expiration: U256::ZERO,
         nonce: U256::ZERO,
-        feeRateBps: U256::ZERO,
+        feeRateBps: if order_type == "GTC" { U256::from(1000u64) } else { U256::ZERO },
         side: side_int,
         signatureType: config.sig_type,
     };
@@ -282,7 +283,7 @@ pub async fn build_and_sign_order(
         taker_amount: taker_amount.to_string(),
         expiration: "0".to_string(),
         nonce: "0".to_string(),
-        fee_rate_bps: "0".to_string(),
+        fee_rate_bps: if order_type == "GTC" { "1000".to_string() } else { "0".to_string() },
         side: side_str.to_string(),
         signature_type: config.sig_type,
         signature,
@@ -340,3 +341,4 @@ pub fn order_to_clob_json(
         "postOnly": false,
     })
 }
+

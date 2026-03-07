@@ -1,75 +1,53 @@
 ```python
-"""
-brain.py - KILLSHOT State Manager & Dashboard Integration
-Handles state transitions, logging, and integration with the Command Center dashboard.
-"""
-
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ViperBrain")
 
-class StateManager:
-    def __init__(self):
-        self.agent_states: Dict[str, str] = {}
-        self.dashboard_endpoint = "http://localhost:7777/api/alerts" # Placeholder for actual dashboard URL
+def make_decision(pnl_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Make trading decisions based on PnL and market state.
+    Returns a 'hold' decision if inputs are invalid to prevent crashes.
+    """
+    default_decision = {
+        "action": "HOLD",
+        "reason": "Invalid or missing data.",
+        "confidence": 0.0
+    }
+    
+    if pnl_data is None:
+        logger.warning("No PnL data provided. Decision: HOLD.")
+        return default_decision
 
-    def update_agent_state(self, agent_id: str, new_state: str, error_details: Optional[str] = None):
-        """
-        Update agent state and emit alert to Dashboard if critical.
+    try:
+        valid = pnl_data.get("valid", False)
+        pnl = pnl_data.get("pnl", 0.0)
         
-        Args:
-            agent_id: Unique identifier for the agent.
-            new_state: New state (running, paused, error, failed).
-            error_details: Optional error message.
-        """
-        self.agent_states[agent_id] = new_state
-        
-        if new_state == "paused":
-            logger.warning(f"Agent {agent_id} paused. State updated in Brain.")
-            self._emit_dashboard_alert(agent_id, "paused", error_details)
+        if not valid:
+            logger.warning("PnL data marked invalid. Decision: HOLD.")
+            return default_decision
             
-        elif new_state == "error":
-            logger.error(f"Agent {agent_id} in error state. Critical alert sent to Dashboard.")
-            self._emit_dashboard_alert(agent_id, "error", error_details)
-            
-        elif new_state == "failed":
-            logger.critical(f"Agent {agent_id} marked as FAILED. Human intervention required.")
-            self._emit_dashboard_alert(agent_id, "failed", error_details)
-            
-        elif new_state == "running":
-            logger.info(f"Agent {agent_id} resumed operation.")
-            self._emit_dashboard_alert(agent_id, "running", None)
-
-    def _emit_dashboard_alert(self, agent_id: str, state: str, error_details: Optional[str]):
-        """
-        Simulate sending alert to Command Center Dashboard.
-        In production, this would make an HTTP POST to the dashboard API.
-        """
-        alert_payload = {
-            "timestamp": datetime.now().isoformat(),
-            "agent_id": agent_id,
-            "state": state,
-            "error_details": error_details,
-            "priority": "high" if state in ["error", "failed"] else "normal"
-        }
-        
-        # Log the alert payload for visibility
-        logger.info(f"Dashboard Alert: {alert_payload}")
-        
-        # TODO: Implement actual HTTP POST to ~/polymarket-bot/bot/dashboard endpoint
-        # requests.post(self.dashboard_endpoint, json=alert_payload)
-
-    def get_all_states(self) -> Dict[str, str]:
-        return self.agent_states.copy()
-
-    def transition_paused_to_pending(self, agent_id: str):
-        """
-        Handle the transition from 'paused' -> 'pending' when recovery succeeds.
-        """
-        if self.agent_states.get(agent_id) == "paused":
-            self.update_agent_state(agent_id, "running")
-            logger.info(f"Transitioned {agent_id} from paused to running.")
+        # Simple logic: If PnL is positive, take profit. If negative, cut loss.
+        if pnl > 0:
+            return {
+                "action": "TAKE_PROFIT",
+                "reason": f"Positive PnL detected: {pnl}",
+                "confidence": 0.8
+            }
+        elif pnl < 0:
+            return {
+                "action": "CUT_LOSS",
+                "reason": f"Negative PnL detected: {pnl}",
+                "confidence": 0.8
+            }
         else:
-            logger.warning(f"Cannot transition {agent_id} from paused to pending. Current state: {self.agent_states.get(agent_id)}")
+            return {
+                "action": "HOLD",
+                "reason": "PnL is zero or negligible.",
+                "confidence": 0.5
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in decision logic: {e}", exc_info=True)
+        return default_decision
+```

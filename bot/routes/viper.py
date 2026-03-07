@@ -281,6 +281,21 @@ def api_viper_scan():
 GOVERNOR_FILE = DATA_DIR / "viper_llm_governor.json"
 
 
+@viper_bp.route("/api/viper/upwork-webhook", methods=["POST"])
+def api_viper_upwork_webhook():
+    """Receive Upwork leads from Vollna webhook alerts."""
+    body = request.get_json(silent=True) or {}
+    try:
+        from viper.sources.vollna import process_webhook
+        lead = process_webhook(body)
+        if lead:
+            return jsonify({"status": "ok", "title": lead.title})
+        return jsonify({"status": "ignored", "reason": "empty payload"}), 400
+    except Exception as e:
+        log.exception("Vollna webhook failed")
+        return jsonify({"status": "error", "error": str(e)[:200]}), 500
+
+
 @viper_bp.route("/api/viper/llm-governor")
 def api_viper_llm_governor():
     """LLM Cost Governor — budget enforcement state."""

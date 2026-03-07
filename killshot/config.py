@@ -1,8 +1,7 @@
-"""Killshot configuration — reads from shared .env file."""
+"""Killshot configuration — spread-only engine."""
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -13,86 +12,71 @@ def _env(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
-def _bool(key: str, default: str = "true") -> bool:
-    return _env(key, default).lower() in ("true", "1", "yes")
-
-
-@dataclass(frozen=True)
 class KillshotConfig:
-    """All Killshot parameters — read from .env with sane defaults."""
+    """Spread-only configuration. No kill zone, no momentum, no directional."""
 
-    # Mode
-    dry_run: bool = _bool("KILLSHOT_DRY_RUN", "true")
-    enabled: bool = _bool("KILLSHOT_ENABLED", "true")
+    def __init__(self):
+        # Mode
+        self.enabled: bool = _env("KILLSHOT_ENABLED", "true").lower() in ("true", "1", "yes")
+        self.dry_run: bool = _env("KILLSHOT_DRY_RUN", "true").lower() in ("true", "1", "yes")
 
-    # Bankroll
-    bankroll_usd: float = float(_env("KILLSHOT_BANKROLL_USD", "150"))
-    max_bet_usd: float = float(_env("KILLSHOT_MAX_BET_USD", "30"))
-    daily_loss_cap_usd: float = float(_env("KILLSHOT_DAILY_LOSS_CAP_USD", "45"))
+        # Bankroll
+        # BUG FIX #45: bankroll_usd was defined but never read by the engine.
+        # Sizing uses max_bet_usd; loss control uses daily_loss_cap_usd.
+        # Kept for operator reference only — has no runtime effect.
+        self.bankroll_usd: float = float(_env("KILLSHOT_BANKROLL_USD", "50"))
+        self.max_bet_usd: float = float(_env("KILLSHOT_SPREAD_MAX_BET_USD", "20"))
+        self.daily_loss_cap_usd: float = float(_env("KILLSHOT_DAILY_LOSS_CAP_USD", "15"))
 
-    # Direction detection — minimum spot price delta to consider direction "locked"
-    direction_threshold: float = float(_env("KILLSHOT_DIRECTION_THRESHOLD", "0.0005"))
+        # Assets
+        self.assets: list[str] = [a.strip() for a in _env("KILLSHOT_ASSETS", "bitcoin").split(",")]
 
-    # Entry pricing — simulated maker limit order price range
-    entry_price_min: float = float(_env("KILLSHOT_ENTRY_PRICE_MIN", "0.90"))
-    entry_price_max: float = float(_env("KILLSHOT_ENTRY_PRICE_MAX", "0.95"))
+        # Timeframes
+        _tf_str = _env("KILLSHOT_TIMEFRAMES", "5m,15m")
+        self.timeframes: list[str] = [t.strip() for t in _tf_str.split(",")]
 
-    # Kill zone — how many seconds before window close to evaluate
-    window_seconds: int = int(_env("KILLSHOT_WINDOW_SECONDS", "60"))
-    min_window_seconds: int = int(_env("KILLSHOT_MIN_WINDOW_SECONDS", "10"))
+        # Loop
+        self.tick_interval_s: float = float(_env("KILLSHOT_TICK_INTERVAL_S", "0.1"))
+        self.scan_interval_s: float = float(_env("KILLSHOT_SCAN_INTERVAL_S", "5"))
 
-    # Assets (comma-separated)
-    assets_str: str = _env("KILLSHOT_ASSETS", "bitcoin")
+        # Wallet (live mode)
+        self.private_key: str = _env("KILLSHOT_PRIVATE_KEY", "")
+        self.clob_api_key: str = _env("KILLSHOT_CLOB_API_KEY", "")
+        self.clob_api_secret: str = _env("KILLSHOT_CLOB_API_SECRET", "")
+        self.clob_api_passphrase: str = _env("KILLSHOT_CLOB_API_PASSPHRASE", "")
+        self.funder_address: str = _env("KILLSHOT_FUNDER_ADDRESS", "")
+        self.signature_type: int = int(_env("KILLSHOT_SIGNATURE_TYPE", "2"))
 
-    # Loop intervals
-    tick_interval_s: float = float(_env("KILLSHOT_TICK_INTERVAL_S", "0.1"))
-    scan_interval_s: float = float(_env("KILLSHOT_SCAN_INTERVAL_S", "60"))
+        # Rust executor
+        self.rust_executor_url: str = _env("KILLSHOT_RUST_EXECUTOR_URL", "http://127.0.0.1:9999")
 
-    # Separate wallet (live mode only)
-    private_key: str = _env("KILLSHOT_PRIVATE_KEY", "")
-    clob_api_key: str = _env("KILLSHOT_CLOB_API_KEY", "")
-    clob_api_secret: str = _env("KILLSHOT_CLOB_API_SECRET", "")
-    clob_api_passphrase: str = _env("KILLSHOT_CLOB_API_PASSPHRASE", "")
-    funder_address: str = _env("KILLSHOT_FUNDER_ADDRESS", "")
+        # Spread parameters
+        self.spread_max_combined_cost: float = float(_env("KILLSHOT_SPREAD_MAX_COMBINED", "0.98"))
+        self.spread_min_net_edge: float = float(_env("KILLSHOT_SPREAD_MIN_NET_EDGE", "0.01"))
+        self.spread_entry_start_s: int = int(_env("KILLSHOT_SPREAD_ENTRY_START_S", "0"))
+        self.spread_entry_end_s: int = int(_env("KILLSHOT_SPREAD_ENTRY_END_S", "120"))
+        # BUG FIX #45: spread_min_leg_depth was defined but never read by the engine.
+        # The engine uses spread_min_leg_shares for per-leg fill checks.
+        # Kept for backward compat — has no runtime effect.
+        self.spread_min_leg_depth: int = int(_env("KILLSHOT_SPREAD_MIN_LEG_DEPTH", "10"))
 
-    # ── Phase 1: Adaptive threshold ─────────────────────────
-    adaptive_threshold: bool = _bool("KILLSHOT_ADAPTIVE_THRESHOLD", "true")
+        # Per-leg fillability
+        self.spread_min_leg_shares: int = int(_env("KILLSHOT_SPREAD_MIN_LEG_SHARES", "10"))
+        # BUG FIX #45: spread_depth_levels was defined but never read by the engine.
+        # The WS/REST book parsers always use top 5 levels hardcoded.
+        # Kept for backward compat — has no runtime effect.
+        self.spread_depth_levels: int = int(_env("KILLSHOT_SPREAD_DEPTH_LEVELS", "3"))
+        self.spread_min_fill_ratio: float = float(_env("KILLSHOT_SPREAD_MIN_FILL_RATIO", "1.2"))
+        self.spread_breaker_pause_s: int = int(_env("KILLSHOT_SPREAD_BREAKER_PAUSE_S", "120"))
 
-    # ── Phase 1: Kelly Criterion sizing ─────────────────────
-    kelly_enabled: bool = _bool("KILLSHOT_KELLY_ENABLED", "true")
-    kelly_fraction: float = float(_env("KILLSHOT_KELLY_FRACTION", "0.5"))
+        # Orphan handling
+        self.orphan_process_interval_s: int = int(_env("KILLSHOT_ORPHAN_INTERVAL_S", "30"))
+        self.orphan_max_attempts: int = int(_env("KILLSHOT_ORPHAN_MAX_ATTEMPTS", "20"))
+        self.orphan_sell_retries: int = int(_env("KILLSHOT_ORPHAN_SELL_RETRIES", "5"))
 
-    # ── Phase 1: Sum-to-one arb detection ───────────────────
-    arb_enabled: bool = _bool("KILLSHOT_ARB_ENABLED", "true")
-    arb_threshold: float = float(_env("KILLSHOT_ARB_THRESHOLD", "0.98"))
+        # Circuit breaker
+        self.breaker_max_consec_fails: int = int(_env("KILLSHOT_BREAKER_MAX_FAILS", "3"))
+        self.breaker_cooldown_s: int = int(_env("KILLSHOT_BREAKER_COOLDOWN_S", "120"))
 
-    # ── Phase 1: Exposure cap ───────────────────────────────
-    max_exposure_usd: float = float(_env("KILLSHOT_MAX_EXPOSURE_USD", "100"))
-
-    # ── Phase 2: Rust executor ──────────────────────────────
-    rust_executor_enabled: bool = _bool("KILLSHOT_RUST_EXECUTOR", "true")
-    rust_executor_url: str = _env("KILLSHOT_RUST_EXECUTOR_URL", "http://127.0.0.1:9999")
-
-    # ── Phase 2: Binance @aggTrade leading indicator ────────
-    binance_agg_enabled: bool = _bool("KILLSHOT_BINANCE_AGG", "true")
-
-    # ── Phase 2: Correlation-aware limits ───────────────────
-    correlation_reduction: float = float(_env("KILLSHOT_CORRELATION_REDUCTION", "0.5"))
-    avg_correlation: float = float(_env("KILLSHOT_AVG_CORRELATION", "0.90"))
-
-    # ── Phase 3: Volatility-adaptive threshold ──────────────
-    volatility_adaptive: bool = _bool("KILLSHOT_VOLATILITY_ADAPTIVE", "true")
-
-    # ── Phase 3: Market types (5m, 1m) ─────────────────────
-    market_types: str = _env("KILLSHOT_MARKET_TYPES", "5m")
-
-    # ── Phase 3: Direction cooldown (conflict avoidance) ────
-    direction_cooldown_s: int = int(_env("KILLSHOT_DIRECTION_COOLDOWN_S", "300"))
-
-    # ── Phase 4: Multi-asset cascade ────────────────────────
-    cascade_enabled: bool = _bool("KILLSHOT_CASCADE", "true")
-    cascade_delay_s: float = float(_env("KILLSHOT_CASCADE_DELAY_S", "0.5"))
-
-    @property
-    def assets(self) -> list[str]:
-        return [a.strip() for a in self.assets_str.split(",")]
+        # Sweeper
+        self.sweeper_interval_s: int = int(_env("KILLSHOT_SWEEPER_INTERVAL_S", "300"))

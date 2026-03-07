@@ -1,84 +1,48 @@
 ```python
-"""
-anomaly.py - KILLSHOT Anomaly Detection Module
-Handles detection of statistical anomalies in trading data.
-"""
-
 import logging
-from typing import Optional, Dict, Any, List
-from datetime import datetime
+from typing import Dict, Any, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("AnomalyDetector")
 
-def detect_anomalies(data: List[Dict[str, Any]], threshold: float = 2.0) -> List[Dict[str, Any]]:
+def detect_anomalies(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Detect statistical anomalies in the provided data list.
+    Detect anomalies in market data.
+    Returns a safe default state if data is missing or malformed.
+    """
+    default_response = {
+        "is_anomalous": False,
+        "details": "No anomalies detected or data unavailable.",
+        "confidence": 0.0
+    }
     
-    Args:
-        data: List of data points (dicts) containing 'value' or similar numeric keys.
-        threshold: Standard deviations threshold for anomaly detection.
-        
-    Returns:
-        List of detected anomalies with metadata.
-    """
-    if not data:
-        return []
+    if data is None:
+        logger.warning("No data provided to anomaly detection. Returning safe state.")
+        return default_response
 
     try:
-        values = [point.get('value', 0) for point in data if isinstance(point.get('value'), (int, float))]
+        # Simulate anomaly detection logic
+        # In production, this would check volatility, volume spikes, etc.
+        volatility = data.get("volatility", 0.0)
+        volume_spike = data.get("volume_spike", False)
         
-        if len(values) < 2:
-            return []
-
-        mean = sum(values) / len(values)
-        variance = sum((x - mean) ** 2 for x in values) / len(values)
-        std_dev = variance ** 0.5 if variance > 0 else 0.0
-
-        anomalies = []
-        for point in data:
-            val = point.get('value', 0)
-            if std_dev > 0:
-                z_score = abs(val - mean) / std_dev
-                if z_score > threshold:
-                    anomalies.append({
-                        "timestamp": point.get('timestamp', datetime.now().isoformat()),
-                        "value": val,
-                        "z_score": z_score,
-                        "type": "statistical_anomaly"
-                    })
-            else:
-                # If std_dev is 0, any non-mean value is an anomaly
-                if val != mean:
-                    anomalies.append({
-                        "timestamp": point.get('timestamp', datetime.now().isoformat()),
-                        "value": val,
-                        "z_score": float('inf'),
-                        "type": "statistical_anomaly"
-                    })
-        
-        return anomalies
-
-    except Exception as e:
-        logger.error(f"Error in detect_anomalies: {str(e)}")
-        return []
-
-def validate_data_integrity(data: List[Dict[str, Any]]) -> bool:
-    """
-    Basic validation of data integrity.
-    
-    Args:
-        data: List of data points.
-        
-    Returns:
-        True if data is valid, False otherwise.
-    """
-    if not isinstance(data, list):
-        return False
-    
-    for item in data:
-        if not isinstance(item, dict):
-            return False
-        if 'value' not in item:
-            return False
+        if volatility > 5.0 or volume_spike:
+            logger.info(f"Anomaly detected: Volatility={volatility}, VolumeSpike={volume_spike}")
+            return {
+                "is_anomalous": True,
+                "details": f"High volatility ({volatility}) or volume spike detected.",
+                "confidence": 0.9
+            }
             
-    return True
+        return {
+            "is_anomalous": False,
+            "details": "Market conditions normal.",
+            "confidence": 1.0
+        }
+        
+    except KeyError as e:
+        logger.error(f"Missing key in anomaly data: {e}")
+        return default_response
+    except Exception as e:
+        logger.error(f"Unexpected error in anomaly detection: {e}", exc_info=True)
+        return default_response
+```

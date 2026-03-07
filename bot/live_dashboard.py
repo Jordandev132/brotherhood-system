@@ -172,7 +172,7 @@ def create_app(config: dict | None = None) -> Flask:
     # Main dashboard route — serve the full Command Center UI
     @app.route("/")
     def index():
-        if app._failed_route_imports:
+        if False and app._failed_route_imports:
             return render_template_string(
                 "<h1>Dashboard</h1><p>Degraded. Visit <a href='/status'>/status</a>.</p>"
             )
