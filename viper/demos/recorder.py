@@ -93,19 +93,10 @@ def _action_type_hours(page: Page) -> None:
 
 
 def _action_trigger_form(page: Page) -> None:
-    _send_message(page, "hello there")
+    _send_message(page, "Is Dr. Kim available for a consultation this week?")
     _wait_for_response(page)
     _scroll_chat(page)
-    try:
-        page.wait_for_selector(".lead-form", timeout=8000)
-    except Exception:
-        _send_message(page, "hi")
-        _wait_for_response(page)
-        _scroll_chat(page)
-        try:
-            page.wait_for_selector(".lead-form", timeout=8000)
-        except Exception:
-            pass
+    page.wait_for_selector(".lead-form", timeout=8000)
 
 
 def _action_form_fill(page: Page) -> None:
@@ -117,6 +108,10 @@ def _action_form_fill(page: Page) -> None:
         _human_type(page, "#leadPhone", "603-555-0142")
         time.sleep(0.3)
         _human_type(page, "#leadEmail", "sarah.johnson@email.com")
+        time.sleep(0.3)
+        # Textarea is pre-filled with the original question; just verify it exists
+        if page.locator("#leadNote").count() > 0:
+            _scroll_chat(page)
     except Exception as e:
         print(f"  [recorder] Warning: form fill issue: {e}")
 

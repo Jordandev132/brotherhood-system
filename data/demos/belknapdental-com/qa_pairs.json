@@ -1,0 +1,337 @@
+[
+  {
+    "question": "What are your hours?",
+    "answer": "We're open Business Hours Monday 7:30 AM  - 4:30 PM Tuesday 7:30 AM  - 4:30 PM Wednesday 7:30 AM  - 4:30 PM Thu. Call us at 603-742-4735 if you need to confirm availability.",
+    "keywords": [
+      "hours",
+      "open",
+      "close",
+      "time",
+      "schedule",
+      "when"
+    ],
+    "category": "hours"
+  },
+  {
+    "question": "How do I book an appointment?",
+    "answer": "You can call us at 603-742-4735 or use our online booking. We'll find a time that works for you!",
+    "keywords": [
+      "appointment",
+      "book",
+      "schedule",
+      "visit",
+      "come in"
+    ],
+    "category": "booking"
+  },
+  {
+    "question": "Do you accept my insurance?",
+    "answer": "We accept Cigna, MetLife, Guardian, Blue Cross, Anthem, GEHA. Not sure if yours is covered? Call us at 603-742-4735 and we'll verify your benefits for free.",
+    "keywords": [
+      "insurance",
+      "accept",
+      "cover",
+      "plan",
+      "delta",
+      "cigna",
+      "aetna",
+      "metlife"
+    ],
+    "category": "insurance"
+  },
+  {
+    "question": "What services do you offer?",
+    "answer": "At Belknap Dental Associates, we offer General Dentistry, Cosmetic Dentistry, Teeth Whitening, Dental Implants, Orthodontics, Root Canal, Crowns, Dentures. We're here for all your dental needs!",
+    "keywords": [
+      "services",
+      "offer",
+      "provide",
+      "do you do",
+      "treatments",
+      "procedures"
+    ],
+    "category": "services"
+  },
+  {
+    "question": "Are you accepting new patients?",
+    "answer": "Yes! Belknap Dental Associates is always welcoming new patients. Call 603-742-4735 to get started — we'll make your first visit easy and comfortable.",
+    "keywords": [
+      "new patient",
+      "accepting",
+      "first time",
+      "join",
+      "sign up",
+      "register"
+    ],
+    "category": "new_patient"
+  },
+  {
+    "question": "What should I expect at my first visit?",
+    "answer": "Your first visit includes a comprehensive exam, X-rays, and a cleaning. We'll discuss your dental health and create a personalized treatment plan. Plan for about 60-90 minutes.",
+    "keywords": [
+      "first visit",
+      "first appointment",
+      "expect",
+      "what happens",
+      "new patient visit"
+    ],
+    "category": "new_patient"
+  },
+  {
+    "question": "Do you handle dental emergencies?",
+    "answer": "Yes, we handle dental emergencies! If you're in pain or had an accident, call 603-742-4735 immediately. We'll get you in as soon as possible.",
+    "keywords": [
+      "emergency",
+      "urgent",
+      "pain",
+      "toothache",
+      "broken",
+      "knocked out",
+      "accident"
+    ],
+    "category": "emergency"
+  },
+  {
+    "question": "How much does a cleaning cost?",
+    "answer": "Cleaning costs vary based on your insurance coverage. Most plans cover preventive cleanings at 100%. Call 603-742-4735 for a cost estimate with your specific insurance.",
+    "keywords": [
+      "cost",
+      "price",
+      "how much",
+      "cleaning",
+      "fee",
+      "charge",
+      "expensive"
+    ],
+    "category": "pricing"
+  },
+  {
+    "question": "Do you offer teeth whitening?",
+    "answer": "Yes! We offer professional teeth whitening that delivers dramatic results safely. Ask about our options at your next visit or call 603-742-4735 to learn more.",
+    "keywords": [
+      "whitening",
+      "whiten",
+      "white",
+      "bright",
+      "bleach",
+      "stain"
+    ],
+    "category": "cosmetic"
+  },
+  {
+    "question": "Do you see children?",
+    "answer": "Absolutely! We love treating kids at Belknap Dental Associates. We recommend bringing children in for their first visit by age 1 or when their first tooth appears.",
+    "keywords": [
+      "children",
+      "kids",
+      "child",
+      "pediatric",
+      "baby",
+      "toddler",
+      "son",
+      "daughter"
+    ],
+    "category": "pediatric"
+  },
+  {
+    "question": "What payment options do you have?",
+    "answer": "We accept most insurance plans, cash, credit cards, and offer financing options for larger treatments. Call 603-742-4735 to discuss payment plans.",
+    "keywords": [
+      "payment",
+      "pay",
+      "finance",
+      "credit",
+      "cash",
+      "payment plan",
+      "afford"
+    ],
+    "category": "billing"
+  },
+  {
+    "question": "Where are you located?",
+    "answer": "Belknap Dental Associates is located at a convenient location in the area. We have easy parking available for patients.",
+    "keywords": [
+      "location",
+      "located",
+      "where",
+      "address",
+      "directions",
+      "find you",
+      "parking"
+    ],
+    "category": "location"
+  },
+  {
+    "question": "Do you offer Invisalign?",
+    "answer": "Yes! We're proud to offer Invisalign clear aligners at Belknap Dental Associates. Schedule a consultation to see if Invisalign is right for you.",
+    "keywords": [
+      "invisalign",
+      "braces",
+      "straighten",
+      "alignment",
+      "crooked",
+      "orthodont"
+    ],
+    "category": "orthodontics"
+  },
+  {
+    "question": "Who are your dentists?",
+    "answer": "Our team includes Dr. Rayanne Lee, Dr. Jefferson Kim, Dr. Peter Wilson, Dr. Jordan Betel. Dr. Rayanne Lee is our board-certified orthodontist, Dr. Jefferson Kim and Dr. Peter Wilson handle general dentistry and Invisalign, and Dr. Jordan Betel specializes in general dentistry with laser certification and same-day crowns.",
+    "keywords": [
+      "dentist",
+      "doctor",
+      "who",
+      "team",
+      "staff",
+      "provider",
+      "dr",
+      "doctors"
+    ],
+    "category": "team"
+  },
+  {
+    "question": "Who are your doctors?",
+    "answer": "We have four wonderful doctors at Belknap Dental Associates: Dr. Rayanne E. Lee (Orthodontist), Dr. Jefferson Kim (General Dentist & Invisalign), Dr. Peter Wilson (General Dentist & Invisalign), and Dr. Jordan Betel (General Dentist, laser-certified). Each brings unique expertise to give you the best care possible.",
+    "keywords": [
+      "doctors",
+      "doctor",
+      "who",
+      "team",
+      "staff",
+      "provider",
+      "dr"
+    ],
+    "category": "doctor"
+  },
+  {
+    "question": "Tell me about Dr. Lee",
+    "answer": "Dr. Rayanne E. Lee, DMD is our board-certified orthodontist. She trained at Harvard and specializes in orthodontic care for patients of all ages — from children to adults. Whether you need braces or aligners, Dr. Lee has you covered.",
+    "keywords": [
+      "lee",
+      "rayanne",
+      "orthodontist",
+      "ortho",
+      "dr lee"
+    ],
+    "category": "doctor"
+  },
+  {
+    "question": "Tell me about Dr. Kim",
+    "answer": "Dr. Jefferson Kim, DMD is a general dentist at Belknap Dental Associates who also offers Invisalign treatments. He graduated from Western University and is known for his personalized approach to care. Originally from North Carolina, Dr. Kim is passionate about building lasting relationships with his patients.",
+    "keywords": [
+      "kim",
+      "jefferson",
+      "dr kim"
+    ],
+    "category": "doctor"
+  },
+  {
+    "question": "Tell me about Dr. Wilson",
+    "answer": "Dr. Peter Wilson, DMD is a general dentist at Belknap Dental Associates with a focus on Invisalign. He graduated from Boston University and is known for his gentle, compassionate approach. Dr. Wilson makes every patient feel at ease, even if you're nervous about the dentist.",
+    "keywords": [
+      "wilson",
+      "peter",
+      "dr wilson"
+    ],
+    "category": "doctor"
+  },
+  {
+    "question": "Tell me about Dr. Betel",
+    "answer": "Dr. Jordan Betel, DMD is a general dentist at Belknap Dental Associates who specializes in laser dentistry and same-day crowns. He graduated from Nova Southeastern University and loves using the latest technology to make your visit faster and more comfortable.",
+    "keywords": [
+      "betel",
+      "jordan betel",
+      "laser",
+      "same-day",
+      "dr betel"
+    ],
+    "category": "doctor"
+  },
+  {
+    "question": "Do you have an orthodontist?",
+    "answer": "Yes! Dr. Rayanne E. Lee is our board-certified orthodontist. She trained at Harvard and provides orthodontic care for all ages, including braces and clear aligners. Call us to schedule an orthodontic consultation.",
+    "keywords": [
+      "orthodontist",
+      "ortho",
+      "braces",
+      "alignment",
+      "orthodontic"
+    ],
+    "category": "doctor"
+  },
+  {
+    "question": "Do you offer sedation dentistry?",
+    "answer": "Yes, we offer sedation options for patients who feel anxious about dental visits. We want every visit to be comfortable and stress-free.",
+    "keywords": [
+      "sedation",
+      "anxious",
+      "nervous",
+      "afraid",
+      "fear",
+      "anxiety",
+      "sleep",
+      "nitrous"
+    ],
+    "category": "comfort"
+  },
+  {
+    "question": "What about dental implants?",
+    "answer": "We offer dental implants as a permanent solution for missing teeth. Call 603-742-4735 to schedule a consultation and learn if implants are right for you.",
+    "keywords": [
+      "implant",
+      "missing tooth",
+      "replace",
+      "permanent"
+    ],
+    "category": "implants"
+  },
+  {
+    "question": "Do you take walk-ins?",
+    "answer": "We prefer appointments so we can give you dedicated time, but we do our best to accommodate walk-ins and emergencies. Call 603-742-4735 to check availability.",
+    "keywords": [
+      "walk-in",
+      "walk in",
+      "without appointment",
+      "drop in",
+      "no appointment"
+    ],
+    "category": "booking"
+  },
+  {
+    "question": "Can I see you on weekends?",
+    "answer": "Please call us at 603-742-4735 to check our weekend availability. We understand busy schedules and try to offer convenient appointment times.",
+    "keywords": [
+      "weekend",
+      "saturday",
+      "sunday",
+      "after hours",
+      "evening"
+    ],
+    "category": "hours"
+  },
+  {
+    "question": "Do you do root canals?",
+    "answer": "Yes, we perform root canal therapy at Belknap Dental Associates. It's a routine procedure and we ensure your comfort throughout. Don't worry — modern root canals are much easier than you might think!",
+    "keywords": [
+      "root canal",
+      "endodontic",
+      "nerve",
+      "infected tooth"
+    ],
+    "category": "services"
+  },
+  {
+    "question": "What COVID precautions do you take?",
+    "answer": "Patient safety is our top priority. We follow all CDC and ADA guidelines including enhanced sanitization, air filtration, and screening protocols.",
+    "keywords": [
+      "covid",
+      "safety",
+      "precaution",
+      "sanitize",
+      "clean",
+      "protocol",
+      "safe"
+    ],
+    "category": "safety"
+  }
+]

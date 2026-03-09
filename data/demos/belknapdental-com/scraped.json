@@ -1,0 +1,46 @@
+{
+  "url": "https://www.belknapdental.com/",
+  "name": "Belknap Dental Associates",
+  "phone": "603-742-4735",
+  "email": "",
+  "address": "",
+  "hours": "Business Hours Monday 7:30 AM  - 4:30 PM Tuesday 7:30 AM  - 4:30 PM Wednesday 7:30 AM  - 4:30 PM Thu",
+  "services": [
+    "General Dentistry",
+    "Cosmetic Dentistry",
+    "Teeth Whitening",
+    "Dental Implants",
+    "Orthodontics",
+    "Root Canal",
+    "Crowns",
+    "Dentures",
+    "Bridges",
+    "Fillings",
+    "Invisalign"
+  ],
+  "team_members": [
+    "Dr. Rayanne Lee",
+    "Dr. Jefferson Kim",
+    "Dr. Peter Wilson",
+    "Dr. Jordan Betel"
+  ],
+  "faq_entries": [],
+  "tagline": "",
+  "description": "603-742-473540 Chestnut St #2, Dover, NH 03820Schedule Appointment",
+  "brand_color": "#2563eb",
+  "niche": "dental",
+  "insurance_plans": [
+    "Cigna",
+    "MetLife",
+    "Guardian",
+    "Blue Cross",
+    "Anthem",
+    "GEHA",
+    "Principal",
+    "Medicaid"
+  ],
+  "listings_sample": [],
+  "areas_served": [],
+  "pages_scraped": 5,
+  "text_chars": 30626
+}

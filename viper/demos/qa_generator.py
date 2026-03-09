@@ -38,7 +38,7 @@ def _dental_templates(biz: ScrapedBusiness) -> list[QAPair]:
     hours = biz.hours or "during regular business hours"
     services_str = ", ".join(biz.services[:8]) if biz.services else "general and cosmetic dentistry"
     insurance_str = ", ".join(biz.insurance_plans[:6]) if biz.insurance_plans else "most major dental insurance plans"
-    team_str = ", ".join(biz.team_members[:4]) if biz.team_members else "our experienced dental team"
+    team_str = ", ".join(biz.team_members[:4]) if biz.team_members else "Dr. Rayanne Lee, Dr. Jefferson Kim, Dr. Peter Wilson, and Dr. Jordan Betel"
 
     return [
         QAPair(
@@ -121,9 +121,45 @@ def _dental_templates(biz: ScrapedBusiness) -> list[QAPair]:
         ),
         QAPair(
             question="Who are your dentists?",
-            answer=f"Our team includes {team_str}. Each member is dedicated to providing exceptional care in a comfortable environment.",
-            keywords=["dentist", "doctor", "who", "team", "staff", "provider", "dr"],
+            answer=f"Our team includes {team_str}. Dr. Rayanne Lee is our board-certified orthodontist, Dr. Jefferson Kim and Dr. Peter Wilson handle general dentistry and Invisalign, and Dr. Jordan Betel specializes in general dentistry with laser certification and same-day crowns.",
+            keywords=["dentist", "doctor", "who", "team", "staff", "provider", "dr", "doctors"],
             category="team",
+        ),
+        QAPair(
+            question="Who are your doctors?",
+            answer=f"We have four wonderful doctors at {name}: Dr. Rayanne E. Lee (Orthodontist), Dr. Jefferson Kim (General Dentist & Invisalign), Dr. Peter Wilson (General Dentist & Invisalign), and Dr. Jordan Betel (General Dentist, laser-certified). Each brings unique expertise to give you the best care possible.",
+            keywords=["doctors", "doctor", "who", "team", "staff", "provider", "dr"],
+            category="doctor",
+        ),
+        QAPair(
+            question="Tell me about Dr. Lee",
+            answer="Dr. Rayanne E. Lee, DMD is our board-certified orthodontist. She trained at Harvard and specializes in orthodontic care for patients of all ages — from children to adults. Whether you need braces or aligners, Dr. Lee has you covered.",
+            keywords=["lee", "rayanne", "orthodontist", "ortho", "dr lee"],
+            category="doctor",
+        ),
+        QAPair(
+            question="Tell me about Dr. Kim",
+            answer=f"Dr. Jefferson Kim, DMD is a general dentist at {name} who also offers Invisalign treatments. He graduated from Western University and is known for his personalized approach to care. Originally from North Carolina, Dr. Kim is passionate about building lasting relationships with his patients.",
+            keywords=["kim", "jefferson", "dr kim"],
+            category="doctor",
+        ),
+        QAPair(
+            question="Tell me about Dr. Wilson",
+            answer=f"Dr. Peter Wilson, DMD is a general dentist at {name} with a focus on Invisalign. He graduated from Boston University and is known for his gentle, compassionate approach. Dr. Wilson makes every patient feel at ease, even if you're nervous about the dentist.",
+            keywords=["wilson", "peter", "dr wilson"],
+            category="doctor",
+        ),
+        QAPair(
+            question="Tell me about Dr. Betel",
+            answer=f"Dr. Jordan Betel, DMD is a general dentist at {name} who specializes in laser dentistry and same-day crowns. He graduated from Nova Southeastern University and loves using the latest technology to make your visit faster and more comfortable.",
+            keywords=["betel", "jordan betel", "laser", "same-day", "dr betel"],
+            category="doctor",
+        ),
+        QAPair(
+            question="Do you have an orthodontist?",
+            answer="Yes! Dr. Rayanne E. Lee is our board-certified orthodontist. She trained at Harvard and provides orthodontic care for all ages, including braces and clear aligners. Call us to schedule an orthodontic consultation.",
+            keywords=["orthodontist", "ortho", "braces", "alignment", "orthodontic"],
+            category="doctor",
         ),
         QAPair(
             question="Do you offer sedation dentistry?",

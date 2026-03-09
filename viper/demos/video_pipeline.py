@@ -40,8 +40,8 @@ DENTAL_SCRIPT_TEXT = (
     "It walks them right through the process. "
     "And if they ask about hours... "
     "Right there. Twenty-four seven. Even when the office is closed. "
-    "Now here's the best part — when a patient needs something the bot can't handle... "
-    "It automatically captures their info as a lead. "
+    "Now here's the best part — watch what happens when someone asks about a specific doctor... "
+    "It recognizes the doctor, and connects them directly — capturing their info as a lead. "
     "Name, phone, email — sent straight to the office. "
     "This runs twenty-four seven, never calls in sick, and pays for itself "
     "in the first week. I built this specifically for your practice — "
@@ -55,7 +55,7 @@ DENTAL_CUES = [
     {"action": "click_booking", "at_phrase": "try booking"},
     {"action": "type_hours", "at_phrase": "ask about hours"},
     {"action": "trigger_form", "at_phrase": "best part"},
-    {"action": "form_fill", "at_phrase": "captures their info"},
+    {"action": "form_fill", "at_phrase": "capturing their info"},
     {"action": "submit", "at_phrase": "sent straight"},
 ]
 

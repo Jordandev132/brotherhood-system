@@ -395,6 +395,18 @@ body {{
   font-size: 0.85rem;
   margin-bottom: 8px;
 }}
+.lead-form textarea {{
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 50px;
+}}
 .lead-form button {{
   background: var(--brand);
   color: white;
@@ -467,6 +479,12 @@ body {{
   var QUICK_ACTIONS = {actions_json};
   var BUSINESS_NAME = {json.dumps(biz.name or "our team")};
   var PHONE = {json.dumps(biz.phone or "")};
+  var DOCTOR_DATA = [
+    {{name: "Dr. Rayanne Lee", lastName: "lee", specialty: "Orthodontist"}},
+    {{name: "Dr. Jefferson Kim", lastName: "kim", specialty: "General Dentist, Invisalign"}},
+    {{name: "Dr. Peter Wilson", lastName: "wilson", specialty: "General Dentist, Invisalign"}},
+    {{name: "Dr. Jordan Betel", lastName: "betel", specialty: "General Dentist, Laser"}}
+  ];
 
   var chatOpen = false;
   var initialized = false;
@@ -595,6 +613,41 @@ body {{
     return null;
   }}
 
+  function isGreeting(text) {{
+    var greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "thanks", "thank you", "yo", "sup", "howdy", "greetings"];
+    var lower = text.toLowerCase().trim();
+    for (var i = 0; i < greetings.length; i++) {{
+      if (lower === greetings[i] || lower.indexOf(greetings[i]) === 0) return true;
+    }}
+    return false;
+  }}
+
+  function detectDoctorMention(text) {{
+    var lower = text.toLowerCase();
+    for (var i = 0; i < DOCTOR_DATA.length; i++) {{
+      if (lower.indexOf(DOCTOR_DATA[i].lastName) !== -1) return DOCTOR_DATA[i];
+    }}
+    return null;
+  }}
+
+  function isAvailabilityQuestion(text) {{
+    var terms = ["available", "availability", "consultation", "schedule with", "appointment with", "meet with", "when can i see", "this week", "next week", "open slot"];
+    var lower = text.toLowerCase();
+    for (var i = 0; i < terms.length; i++) {{
+      if (lower.indexOf(terms[i]) !== -1) return true;
+    }}
+    return false;
+  }}
+
+  function isMedicalQuestion(text) {{
+    var terms = ["diagnosis", "treatment plan", "should i get", "do i need", "x-ray", "recommend", "second opinion", "pain in my", "my tooth", "what procedure", "my molar", "my gums", "bleeding", "swollen", "infection", "cavity"];
+    var lower = text.toLowerCase();
+    for (var i = 0; i < terms.length; i++) {{
+      if (lower.indexOf(terms[i]) !== -1) return true;
+    }}
+    return false;
+  }}
+
   function handleUserInput(text) {{
     addUserMessage(text);
     showTyping();
@@ -602,13 +655,64 @@ body {{
     var delay = 600 + Math.random() * 600;
     setTimeout(function() {{
       hideTyping();
+
+      // Tier 1: Greetings
+      if (isGreeting(text)) {{
+        addBotMessage("Hello! How can I help you today?");
+        return;
+      }}
+
+      // Gather context
+      var doctor = detectDoctorMention(text);
       var answer = findBestMatch(text);
+      var availability = isAvailabilityQuestion(text);
+      var medical = isMedicalQuestion(text);
+
+      // Tier 3: Doctor-specific or medical lead capture (check BEFORE Tier 2)
+      if (doctor && availability) {{
+        showDoctorLeadCapture(text, doctor);
+        return;
+      }}
+      if (medical && !answer) {{
+        showDoctorLeadCapture(text, null);
+        return;
+      }}
+
+      // Tier 2: Knowledge base answer
       if (answer) {{
         addBotMessage(answer);
-      }} else {{
-        showLeadCapture(text);
+        return;
       }}
+
+      // Fallback: Generic lead capture
+      showLeadCapture(text);
     }}, delay);
+  }}
+
+  function showDoctorLeadCapture(originalQuestion, doctor) {{
+    var body = document.getElementById("chatBody");
+    var msg;
+    if (doctor) {{
+      msg = "That's a great question for " + doctor.name + ". Let me connect you — leave your info and your question, and we'll have them follow up directly.";
+    }} else {{
+      msg = "That's a great question for our dental team. Let me connect you — leave your info and your question, and we'll have the right doctor follow up directly.";
+    }}
+    addBotMessage(msg);
+
+    var form = document.createElement("div");
+    form.className = "lead-form";
+    form.setAttribute("data-doctor-requested", doctor ? doctor.name : "");
+    form.setAttribute("data-question-text", originalQuestion);
+    var escapedQ = originalQuestion.replace(/"/g, "&quot;");
+    form.innerHTML =
+      "<p>Leave your info and we will get back to you:</p>" +
+      "<input type=\\"text\\" id=\\"leadName\\" placeholder=\\"Your name\\">" +
+      "<input type=\\"tel\\" id=\\"leadPhone\\" placeholder=\\"Phone number\\">" +
+      "<input type=\\"email\\" id=\\"leadEmail\\" placeholder=\\"Email address\\">" +
+      "<textarea id=\\"leadNote\\" placeholder=\\"Your question or concern\\">" + originalQuestion + "</textarea>" +
+      "<button onclick=\\"submitLead()\\" type=\\"button\\">Send</button>";
+    body.appendChild(form);
+    body.scrollTop = body.scrollHeight;
   }}
 
   function showLeadCapture(originalQuestion) {{
