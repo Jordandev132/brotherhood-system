@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from viper.prospecting.maps_scraper import MapsListing
-from viper.prospecting.chatbot_detector import ChatbotDetectionResult
+from viper.prospecting.chatbot_detector import ChatbotDetectionResult, Confidence
 from viper.demos.scraper import ScrapedBusiness
 
 
@@ -27,11 +27,11 @@ def score_prospect(
     bd = {}
 
     # A. Chatbot status (max 4)
-    if chatbot is None or chatbot.confidence == "unknown":
-        bd["chatbot"] = 2.0  # can't tell — moderate score
-    elif chatbot.has_chatbot:
+    if chatbot is None or chatbot.confidence == Confidence.UNCERTAIN:
+        bd["chatbot"] = 2.0  # can't tell — Jordan reviews
+    elif chatbot.confidence == Confidence.DETECTED:
         bd["chatbot"] = 0.0
-    else:
+    else:  # NOT_FOUND
         bd["chatbot"] = 4.0
 
     # B. Website reachability (max 2)

@@ -9,7 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from viper.prospecting.maps_scraper import MapsListing
-from viper.prospecting.chatbot_detector import ChatbotDetectionResult
+from viper.prospecting.chatbot_detector import ChatbotDetectionResult, Confidence
 from viper.prospecting.local_scorer import ProspectScore
 from viper.demos.scraper import ScrapedBusiness
 
@@ -31,6 +31,7 @@ class LocalProspect:
     address: str = ""
     has_chatbot: bool = False
     chatbot_name: str = ""
+    chatbot_confidence: str = "UNCERTAIN"  # DETECTED, NOT_FOUND, UNCERTAIN
     google_rating: float = 0.0
     review_count: int = 0
     maps_url: str = ""
@@ -63,6 +64,7 @@ def build_prospect(
         address=listing.address or (scraped.address if scraped else ""),
         has_chatbot=chatbot.has_chatbot if chatbot else False,
         chatbot_name=chatbot.chatbot_name if chatbot else "",
+        chatbot_confidence=chatbot.confidence.value if chatbot else "UNCERTAIN",
         google_rating=listing.rating,
         review_count=listing.review_count,
         maps_url=listing.maps_url,
@@ -106,18 +108,23 @@ def print_summary(prospects: list[LocalProspect], top_n: int = 20) -> None:
     print(f"  TOP {len(top)} PROSPECTS (sorted by score)")
     print(f"{'='*100}")
     print(
-        f"  {'#':>2}  {'Score':>5}  {'Pri':>4}  {'Chatbot':>12}  "
+        f"  {'#':>2}  {'Score':>5}  {'Pri':>4}  {'Chat Status':>11}  "
         f"{'Rating':>6}  {'Phone':>14}  {'Name':<35}"
     )
-    print(f"  {'-'*2}  {'-'*5}  {'-'*4}  {'-'*12}  {'-'*6}  {'-'*14}  {'-'*35}")
+    print(f"  {'-'*2}  {'-'*5}  {'-'*4}  {'-'*11}  {'-'*6}  {'-'*14}  {'-'*35}")
 
     for i, p in enumerate(top, 1):
-        chatbot_col = p.chatbot_name if p.has_chatbot else "None"
+        if p.chatbot_confidence == "DETECTED":
+            chat_col = p.chatbot_name[:11]
+        elif p.chatbot_confidence == "NOT_FOUND":
+            chat_col = "None"
+        else:
+            chat_col = "UNCERTAIN"
         rating_col = f"{p.google_rating:.1f}/{p.review_count}" if p.review_count else "—"
         phone_col = p.phone or "—"
         name_col = p.business_name[:35]
         print(
-            f"  {i:>2}  {p.score:>5.1f}  {p.outreach_priority:>4}  {chatbot_col:>12}  "
+            f"  {i:>2}  {p.score:>5.1f}  {p.outreach_priority:>4}  {chat_col:>11}  "
             f"{rating_col:>6}  {phone_col:>14}  {name_col:<35}"
         )
 
@@ -129,7 +136,9 @@ def print_summary(prospects: list[LocalProspect], top_n: int = 20) -> None:
     low = sum(1 for p in top if p.outreach_priority == "LOW")
     print(f"  Priority: {high} HIGH, {med} MEDIUM, {low} LOW")
 
-    # Chatbot stats
-    with_bot = sum(1 for p in top if p.has_chatbot)
-    print(f"  Chatbots: {with_bot}/{len(top)} already have one")
+    # Chatbot confidence breakdown
+    detected = sum(1 for p in top if p.chatbot_confidence == "DETECTED")
+    not_found = sum(1 for p in top if p.chatbot_confidence == "NOT_FOUND")
+    uncertain = sum(1 for p in top if p.chatbot_confidence == "UNCERTAIN")
+    print(f"  Chatbots: {detected} DETECTED (skip), {not_found} NOT_FOUND (send), {uncertain} UNCERTAIN (Jordan reviews)")
     print()

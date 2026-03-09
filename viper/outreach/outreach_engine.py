@@ -58,8 +58,9 @@ def run_outreach(
         dict with 'sent', 'skipped', 'failed', 'already_contacted' counts
     """
     niche_key = resolve_niche_key(niche)
-    stats = {"sent": 0, "skipped": 0, "failed": 0, "already_contacted": 0}
+    stats = {"sent": 0, "skipped": 0, "failed": 0, "already_contacted": 0, "uncertain": 0}
     sent_names = []
+    uncertain_names = []
 
     qualified = [p for p in prospects if p.score >= min_score]
     if not qualified:
@@ -69,6 +70,12 @@ def run_outreach(
     print(f"\n  [outreach] {len(qualified)} prospects qualify (score >= {min_score})")
 
     for p in qualified:
+        # DETECTED = auto-skip (already has a chatbot)
+        if p.chatbot_confidence == "DETECTED":
+            log.info("Skipping %s — chatbot DETECTED (%s)", p.business_name, p.chatbot_name)
+            stats["skipped"] += 1
+            continue
+
         # Must have email
         if not p.email:
             log.debug("Skipping %s — no email", p.business_name)
@@ -79,6 +86,13 @@ def run_outreach(
         if already_contacted(p.email, niche, city):
             log.info("Already contacted %s — skipping", p.business_name)
             stats["already_contacted"] += 1
+            continue
+
+        # UNCERTAIN = flag for Jordan, don't auto-send
+        if p.chatbot_confidence == "UNCERTAIN":
+            uncertain_names.append(p.business_name)
+            stats["uncertain"] += 1
+            print(f"  [outreach] UNCERTAIN: {p.business_name} — flagged for Jordan review")
             continue
 
         # Build demo URL
@@ -134,7 +148,7 @@ def run_outreach(
             stats["failed"] += 1
             print(f"  [outreach] FAILED {p.business_name}: {result['error']}")
 
-    # Notify Jordan
+    # Notify Jordan — sent summary
     if stats["sent"] > 0:
         names_str = ", ".join(sent_names[:5])
         if len(sent_names) > 5:
@@ -146,8 +160,20 @@ def run_outreach(
             f"Targets: {names_str}"
         )
 
+    # Notify Jordan — uncertain leads need review
+    if uncertain_names:
+        names_str = ", ".join(uncertain_names[:5])
+        if len(uncertain_names) > 5:
+            names_str += f" +{len(uncertain_names) - 5} more"
+        _notify_jordan(
+            f"UNCERTAIN leads ({len(uncertain_names)}): scanner couldn't confirm chatbot status. "
+            f"Review needed: {names_str}. "
+            f"Check data/prospects/ JSON for details."
+        )
+
     print(f"\n  [outreach] Done: {stats['sent']} sent, "
-          f"{stats['skipped']} skipped (no email), "
+          f"{stats['skipped']} skipped (has chatbot/no email), "
+          f"{stats['uncertain']} uncertain (Jordan reviews), "
           f"{stats['failed']} failed, "
           f"{stats['already_contacted']} already contacted")
 
