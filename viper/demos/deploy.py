@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 GH_CLI = Path.home() / "bin" / "gh"
 REPO_NAME = "chatbot-demos"
-REPO_OWNER = "abdul6603"
+REPO_OWNER = "DarkCode-AI"
 REPO_DIR = Path.home() / "polymarket-bot" / "data" / "demos" / "_repo"
 BASE_URL = f"https://{REPO_OWNER}.github.io/{REPO_NAME}"
 
