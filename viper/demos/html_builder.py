@@ -631,7 +631,7 @@ body {{
   }}
 
   function isAvailabilityQuestion(text) {{
-    var terms = ["available", "availability", "consultation", "schedule with", "appointment with", "meet with", "when can i see", "this week", "next week", "open slot"];
+    var terms = ["available", "availability", "consultation", "schedule with", "appointment with", "appointment", "meet with", "when can i see", "can i see", "this week", "next week", "open slot", "book with", "want to see", "want to book"];
     var lower = text.toLowerCase();
     for (var i = 0; i < terms.length; i++) {{
       if (lower.indexOf(terms[i]) !== -1) return true;
@@ -693,7 +693,7 @@ body {{
     var body = document.getElementById("chatBody");
     var msg;
     if (doctor) {{
-      msg = "Great choice! " + doctor.name + " is wonderful. Their availability depends on the current schedule — leave your info below and our team will check and follow up with you directly.";
+      msg = "Great choice! " + doctor.name + "'s availability depends on the current schedule — leave your info below and our team will check and follow up with you directly.";
     }} else {{
       msg = "That's a great question for our dental team. Leave your info below and we'll have the right doctor follow up with you directly.";
     }}
