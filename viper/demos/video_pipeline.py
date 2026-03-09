@@ -1,5 +1,9 @@
 """Video Pipeline — Orchestrator + CLI for automated demo video generation.
 
+Architecture: ONE continuous voiceover with character-level timestamps
+from ElevenLabs. Cue phrases in the script map to exact timestamps.
+The recorder fires actions at those timestamps. Perfect sync, permanently.
+
 Usage:
     python -m viper.demos.video_pipeline --business dental
 """
@@ -7,13 +11,12 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from viper.demos.compositor import composite
 from viper.demos.recorder import record_demo
-from viper.demos.voiceover import SegmentInfo, concat_voiceover, generate_segments
+from viper.demos.voiceover import generate_voiceover, load_cached_voiceover
 
 
 @dataclass
@@ -21,70 +24,46 @@ class DemoConfig:
     """Configuration for a demo video."""
     business_name: str
     demo_url: str
-    voiceover_script: list[dict]
+    script_text: str
+    cues: list[dict]
     output_dir: Path
 
 
-# ── Pre-built dental config ──
-DENTAL_SCRIPT = [
-    {
-        "id": "intro",
-        "text": "Hey, check this out — I built a custom AI assistant for Belknap Dental.",
-    },
-    {
-        "id": "open_chat",
-        "text": "Watch what happens when a patient visits the website and clicks the chat.",
-    },
-    {
-        "id": "ask_insurance",
-        "text": "Let's ask about insurance — this is the number one question dental offices get.",
-    },
-    {
-        "id": "insurance_response",
-        "text": "Boom — instant answer. No staff time wasted.",
-    },
-    {
-        "id": "book_appt",
-        "text": "Now let's try booking an appointment.",
-    },
-    {
-        "id": "appt_response",
-        "text": "It walks them right through the process.",
-    },
-    {
-        "id": "ask_hours",
-        "text": "And if they ask about hours...",
-    },
-    {
-        "id": "hours_response",
-        "text": "Right there. Twenty-four seven. Even when the office is closed.",
-    },
-    {
-        "id": "trigger_form",
-        "text": "Now here's the best part — when a patient needs something the bot can't handle...",
-    },
-    {
-        "id": "form_fill",
-        "text": "It automatically captures their info as a lead.",
-    },
-    {
-        "id": "submit",
-        "text": "Name, phone, email — sent straight to the office.",
-    },
-    {
-        "id": "closing",
-        "text": (
-            "This runs twenty-four seven, never calls in sick, and pays for itself "
-            "in the first week. I built this specifically for your practice — "
-            "want me to set it up?"
-        ),
-    },
+# ── Dental voiceover — one continuous script with cue phrases ──
+
+DENTAL_SCRIPT_TEXT = (
+    "Hey, check this out — I built a custom AI assistant for Belknap Dental. "
+    "Watch what happens when a patient visits the website and clicks the chat. "
+    "Let's ask about insurance — this is the number one question dental offices get. "
+    "Boom — instant answer. No staff time wasted. "
+    "Now let's try booking an appointment. "
+    "It walks them right through the process. "
+    "And if they ask about hours... "
+    "Right there. Twenty-four seven. Even when the office is closed. "
+    "Now here's the best part — when a patient needs something the bot can't handle... "
+    "It automatically captures their info as a lead. "
+    "Name, phone, email — sent straight to the office. "
+    "This runs twenty-four seven, never calls in sick, and pays for itself "
+    "in the first week. I built this specifically for your practice — "
+    "want me to set it up?"
+)
+
+# Each cue fires the action when the voice starts saying the phrase
+DENTAL_CUES = [
+    {"action": "open_chat", "at_phrase": "clicks the chat"},
+    {"action": "type_insurance", "at_phrase": "ask about insurance"},
+    {"action": "click_booking", "at_phrase": "try booking"},
+    {"action": "type_hours", "at_phrase": "ask about hours"},
+    {"action": "trigger_form", "at_phrase": "best part"},
+    {"action": "form_fill", "at_phrase": "captures their info"},
+    {"action": "submit", "at_phrase": "sent straight"},
 ]
 
 DENTAL_CONFIG = DemoConfig(
     business_name="Belknap Dental",
     demo_url="https://darkcode-ai.github.io/chatbot-demos/belknapdental-com/",
-    voiceover_script=DENTAL_SCRIPT,
+    script_text=DENTAL_SCRIPT_TEXT,
+    cues=DENTAL_CUES,
     output_dir=Path.home() / "polymarket-bot" / "data" / "demos" / "videos",
 )
 
@@ -93,23 +72,10 @@ CONFIGS = {
 }
 
 
-def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Path, Path]:
-    """Generate a complete demo video.
-
-    Pipeline:
-        1. Generate voiceover segments (ElevenLabs)
-        2. Record browser demo (Playwright)
-        3. Composite video + audio (moviepy/ffmpeg)
-
-    Returns:
-        tuple of (horizontal_mp4, vertical_mp4)
-    """
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load ElevenLabs API key
+def _load_api_key() -> str:
+    """Load ElevenLabs API key from env or soren .env."""
     api_key = os.environ.get("ELEVENLABS_API_KEY")
     if not api_key:
-        # Try loading from soren .env
         env_path = Path.home() / "soren-content" / ".env"
         if env_path.exists():
             for line in env_path.read_text().splitlines():
@@ -120,47 +86,59 @@ def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Pat
         raise RuntimeError(
             "ELEVENLABS_API_KEY not found. Set it in env or ~/soren-content/.env"
         )
+    return api_key
 
-    # Step 1: Generate voiceover
+
+def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Path, Path]:
+    """Generate a complete demo video with timestamp-synced voiceover.
+
+    Pipeline:
+        1. Generate voiceover with character-level timestamps (ElevenLabs)
+        2. Extract cue sheet (phrase → timestamp mapping)
+        3. Record browser demos at cue timestamps (Playwright)
+        4. Composite video + audio (moviepy/ffmpeg)
+
+    Returns:
+        tuple of (horizontal_mp4, vertical_mp4)
+    """
+    config.output_dir.mkdir(parents=True, exist_ok=True)
     vo_dir = config.output_dir / "voiceover"
-    voiceover_path = vo_dir / "voiceover_full.wav"
 
-    if skip_voiceover and voiceover_path.exists():
-        print("\n=== Step 1: Reusing existing voiceover ===")
-        # Rebuild segment info from existing WAV files
-        import wave
-        segments = []
-        for item in config.voiceover_script:
-            seg_path = vo_dir / f"{item['id']}.wav"
-            if seg_path.exists():
-                with wave.open(str(seg_path), "rb") as wf:
-                    dur = wf.getnframes() / wf.getframerate()
-                segments.append(SegmentInfo(id=item["id"], path=seg_path, duration_sec=dur))
-            else:
-                raise FileNotFoundError(f"Missing cached segment: {seg_path}")
-        total_duration = sum(s.duration_sec for s in segments) + 0.3 * (len(segments) - 1)
-        print(f"  Cached voiceover: {total_duration:.1f}s ({len(segments)} segments)")
-    else:
-        print("\n=== Step 1: Generating voiceover segments ===")
-        segments = generate_segments(config.voiceover_script, api_key, vo_dir)
-        total_duration = sum(s.duration_sec for s in segments) + 0.3 * (len(segments) - 1)
-        print(f"  Total voiceover duration: {total_duration:.1f}s")
-        voiceover_path = concat_voiceover(segments, voiceover_path)
+    # Step 1: Generate voiceover with timestamps
+    vo_result = None
+    if skip_voiceover:
+        vo_result = load_cached_voiceover(vo_dir)
+        if vo_result:
+            print("\n=== Step 1: Reusing cached voiceover + cue sheet ===")
+            print(f"  Duration: {vo_result.duration_sec:.1f}s, {len(vo_result.cue_sheet)} cues")
 
-    # Step 2a: Record desktop (1920x1080) for horizontal
+    if vo_result is None:
+        print("\n=== Step 1: Generating voiceover with timestamps ===")
+        api_key = _load_api_key()
+        vo_result = generate_voiceover(
+            config.script_text, config.cues, api_key, vo_dir,
+        )
+
+    # Step 2a: Record desktop (1920x1080)
     print("\n=== Step 2a: Recording desktop demo (1920x1080) ===")
     rec_desktop = config.output_dir / "recording_desktop"
-    video_path = record_demo(config.demo_url, segments, rec_desktop, viewport=(1920, 1080))
+    video_path = record_demo(
+        config.demo_url, vo_result.cue_sheet, vo_result.duration_sec,
+        rec_desktop, viewport=(1920, 1080),
+    )
 
-    # Step 2b: Record mobile (390x844) for vertical
+    # Step 2b: Record mobile (390x844)
     print("\n=== Step 2b: Recording mobile demo (390x844) ===")
     rec_mobile = config.output_dir / "recording_mobile"
-    mobile_video_path = record_demo(config.demo_url, segments, rec_mobile, viewport=(390, 844))
+    mobile_video_path = record_demo(
+        config.demo_url, vo_result.cue_sheet, vo_result.duration_sec,
+        rec_mobile, viewport=(390, 844),
+    )
 
     # Step 3: Composite final videos
     print("\n=== Step 3: Compositing final videos ===")
     h_path, v_path = composite(
-        video_path, voiceover_path, config.output_dir, config.business_name,
+        video_path, vo_result.audio_path, config.output_dir, config.business_name,
         vertical_video_path=mobile_video_path,
     )
 
@@ -187,7 +165,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-voiceover",
         action="store_true",
-        help="Reuse existing voiceover WAVs (saves ElevenLabs credits)",
+        help="Reuse cached voiceover + cue sheet (saves ElevenLabs credits)",
     )
     args = parser.parse_args()
 

@@ -1,144 +1,173 @@
-"""Voiceover — ElevenLabs TTS segment generator for demo videos."""
+"""Voiceover — ElevenLabs TTS with character-level timestamp alignment.
+
+Generates ONE continuous voiceover and extracts cue-point timestamps
+from the alignment data. The recorder uses these timestamps to fire
+actions at the exact moment the voice mentions them.
+"""
 from __future__ import annotations
 
-import io
-import struct
-import wave
+import base64
+import json
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import mkdtemp
 
 from elevenlabs import ElevenLabs
 
+# Voice config — Brian (deep, resonant, conversational)
+VOICE_ID = "nPczCjzI2devNBz1zQrb"
+MODEL_ID = "eleven_multilingual_v2"
+VOICE_SETTINGS = {
+    "stability": 0.55,
+    "similarity_boost": 0.75,
+    "style": 0.25,
+    "use_speaker_boost": True,
+}
+
 
 @dataclass
-class SegmentInfo:
-    """Info about a generated voiceover segment."""
-    id: str
-    path: Path
+class CuePoint:
+    """A cue point: an action to fire at an exact timestamp."""
+    action: str
+    timestamp: float  # seconds from start of voiceover
+
+
+@dataclass
+class VoiceoverResult:
+    """Result of voiceover generation with cue sheet."""
+    audio_path: Path
     duration_sec: float
-
-
-def _wav_duration(path: Path) -> float:
-    """Get duration of a WAV file in seconds."""
-    with wave.open(str(path), "rb") as wf:
-        frames = wf.getnframes()
-        rate = wf.getframerate()
-        return frames / rate
+    cue_sheet: list[CuePoint]
 
 
 def _mp3_to_wav(mp3_bytes: bytes, wav_path: Path) -> None:
-    """Convert MP3 bytes to WAV using moviepy/ffmpeg."""
-    import subprocess
-    import tempfile
-
+    """Convert MP3 bytes to WAV via ffmpeg."""
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         tmp.write(mp3_bytes)
         tmp_mp3 = tmp.name
 
     subprocess.run(
-        ["ffmpeg", "-y", "-i", tmp_mp3, "-ar", "44100", "-ac", "1", wav_path],
+        ["ffmpeg", "-y", "-i", tmp_mp3, "-ar", "44100", "-ac", "1", str(wav_path)],
         capture_output=True,
         check=True,
     )
     Path(tmp_mp3).unlink(missing_ok=True)
 
 
-def generate_segments(
-    script: list[dict],
+def _wav_duration(path: Path) -> float:
+    """Get WAV file duration in seconds."""
+    import wave
+    with wave.open(str(path), "rb") as wf:
+        return wf.getnframes() / wf.getframerate()
+
+
+def _find_phrase_timestamp(
+    text: str,
+    char_starts: list[float],
+    phrase: str,
+) -> float:
+    """Find the timestamp when a phrase starts in the alignment data.
+
+    Searches for the phrase in the text and returns the character-level
+    start time of the first character of the phrase.
+    """
+    idx = text.lower().find(phrase.lower())
+    if idx == -1:
+        raise ValueError(f"Cue phrase '{phrase}' not found in voiceover text")
+    # Return the start time of the first character of the phrase
+    if idx < len(char_starts):
+        return char_starts[idx]
+    raise ValueError(f"Cue phrase '{phrase}' found at index {idx} but only {len(char_starts)} timestamps")
+
+
+def generate_voiceover(
+    script_text: str,
+    cues: list[dict],
     api_key: str,
-    output_dir: Path | None = None,
-) -> list[SegmentInfo]:
-    """Generate TTS audio for each script segment.
+    output_dir: Path,
+) -> VoiceoverResult:
+    """Generate a single voiceover with character-aligned cue timestamps.
 
     Args:
-        script: list of {"id": "intro", "text": "Hey, check this out..."}
+        script_text: full voiceover script as one continuous string
+        cues: list of {"action": "open_chat", "at_phrase": "clicks the chat"}
+              each cue maps an action to the phrase whose start time triggers it
         api_key: ElevenLabs API key
-        output_dir: directory for WAV files (default: temp dir)
+        output_dir: directory for output audio
 
     Returns:
-        list of SegmentInfo with id, path, and measured duration
+        VoiceoverResult with audio path, duration, and cue sheet
     """
-    if output_dir is None:
-        output_dir = Path(mkdtemp(prefix="demo_vo_"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     client = ElevenLabs(api_key=api_key)
-    segments: list[SegmentInfo] = []
 
-    for item in script:
-        seg_id = item["id"]
-        text = item["text"]
-        wav_path = output_dir / f"{seg_id}.wav"
+    print("  [ElevenLabs] Generating voiceover with timestamps...")
+    result = client.text_to_speech.convert_with_timestamps(
+        text=script_text,
+        voice_id=VOICE_ID,
+        model_id=MODEL_ID,
+        voice_settings=VOICE_SETTINGS,
+    )
 
-        print(f"  [ElevenLabs] Generating: {seg_id}")
+    # Decode audio
+    audio_bytes = base64.b64decode(result.audio_base_64)
+    wav_path = output_dir / "voiceover_full.wav"
+    _mp3_to_wav(audio_bytes, wav_path)
 
-        # Generate with conversational settings (NOT Soren's dramatic style)
-        audio_gen = client.text_to_speech.convert(
-            text=text,
-            voice_id="nPczCjzI2devNBz1zQrb",  # Brian — deep, resonant, conversational
-            model_id="eleven_multilingual_v2",
-            voice_settings={
-                "stability": 0.55,
-                "similarity_boost": 0.75,
-                "style": 0.25,
-                "use_speaker_boost": True,
-            },
-        )
+    duration = _wav_duration(wav_path)
+    print(f"  [ElevenLabs] Voiceover: {duration:.1f}s")
 
-        # Collect MP3 bytes from generator
-        mp3_data = b""
-        for chunk in audio_gen:
-            mp3_data += chunk
+    # Extract alignment data
+    alignment = result.alignment
+    chars = alignment.characters
+    char_starts = alignment.character_start_times_seconds
+    text_from_chars = "".join(chars)
 
-        # Convert MP3 to WAV for timing/concat
-        _mp3_to_wav(mp3_data, wav_path)
+    # Build cue sheet from phrase matching
+    cue_sheet: list[CuePoint] = []
+    for cue in cues:
+        action = cue["action"]
+        phrase = cue["at_phrase"]
+        try:
+            ts = _find_phrase_timestamp(text_from_chars, char_starts, phrase)
+            cue_sheet.append(CuePoint(action=action, timestamp=ts))
+            print(f"  [cue] {action} @ {ts:.2f}s ('{phrase}')")
+        except ValueError as e:
+            print(f"  [cue] WARNING: {e}")
 
-        duration = _wav_duration(wav_path)
-        print(f"  [done] {seg_id}: {duration:.2f}s")
-        segments.append(SegmentInfo(id=seg_id, path=wav_path, duration_sec=duration))
+    # Sort by timestamp
+    cue_sheet.sort(key=lambda c: c.timestamp)
 
-    return segments
+    # Save cue sheet as JSON for debugging/reuse
+    cue_json = output_dir / "cue_sheet.json"
+    cue_json.write_text(json.dumps(
+        [{"action": c.action, "timestamp": c.timestamp} for c in cue_sheet],
+        indent=2,
+    ))
+
+    return VoiceoverResult(
+        audio_path=wav_path,
+        duration_sec=duration,
+        cue_sheet=cue_sheet,
+    )
 
 
-def concat_voiceover(segments: list[SegmentInfo], output_path: Path | None = None) -> Path:
-    """Join all WAV segments with 0.3s silence gaps.
+def load_cached_voiceover(output_dir: Path) -> VoiceoverResult | None:
+    """Load cached voiceover + cue sheet if they exist."""
+    wav_path = output_dir / "voiceover_full.wav"
+    cue_json = output_dir / "cue_sheet.json"
 
-    Args:
-        segments: list of SegmentInfo from generate_segments()
-        output_path: output WAV path (default: alongside first segment)
+    if not wav_path.exists() or not cue_json.exists():
+        return None
 
-    Returns:
-        Path to concatenated WAV file
-    """
-    if not segments:
-        raise ValueError("No segments to concatenate")
+    duration = _wav_duration(wav_path)
+    cue_data = json.loads(cue_json.read_text())
+    cue_sheet = [CuePoint(action=c["action"], timestamp=c["timestamp"]) for c in cue_data]
 
-    if output_path is None:
-        output_path = segments[0].path.parent / "voiceover_full.wav"
-
-    # Read first segment to get params
-    with wave.open(str(segments[0].path), "rb") as wf:
-        params = wf.getparams()
-        sample_rate = params.framerate
-        sample_width = params.sampwidth
-        n_channels = params.nchannels
-
-    # 0.3s silence gap
-    gap_frames = int(sample_rate * 0.3)
-    silence = b"\x00" * (gap_frames * sample_width * n_channels)
-
-    with wave.open(str(output_path), "wb") as out:
-        out.setnchannels(n_channels)
-        out.setsampwidth(sample_width)
-        out.setframerate(sample_rate)
-
-        for i, seg in enumerate(segments):
-            with wave.open(str(seg.path), "rb") as wf:
-                out.writeframes(wf.readframes(wf.getnframes()))
-            # Add gap between segments (not after last)
-            if i < len(segments) - 1:
-                out.writeframes(silence)
-
-    print(f"  [concat] Full voiceover: {output_path}")
-    return output_path
+    return VoiceoverResult(
+        audio_path=wav_path,
+        duration_sec=duration,
+        cue_sheet=cue_sheet,
+    )

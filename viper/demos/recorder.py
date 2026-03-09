@@ -1,9 +1,8 @@
-"""Recorder — Playwright screen recorder with timestamp-driven sync.
+"""Recorder — Playwright screen recorder with timestamp-driven cue sync.
 
-Actions are gated by voiceover segment durations. Each segment maps to
-an action; the recorder executes the action, then waits exactly the
-remaining segment time before advancing. This guarantees the visual
-actions are in sync with the voiceover audio.
+Actions fire at exact voiceover timestamps. No sleep() guesswork.
+The recorder starts a monotonic clock at recording start, then for each
+cue point: wait_until(cue.timestamp) → execute action.
 """
 from __future__ import annotations
 
@@ -14,19 +13,17 @@ from typing import Callable
 
 from playwright.sync_api import Page, sync_playwright
 
-from viper.demos.voiceover import SegmentInfo
+from viper.demos.voiceover import CuePoint
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _smooth_move(page: Page, x: int, y: int) -> None:
-    """Move mouse smoothly to target coordinates."""
     page.mouse.move(x, y, steps=25)
     time.sleep(random.uniform(0.1, 0.2))
 
 
 def _human_type(page: Page, selector: str, text: str) -> None:
-    """Type text with realistic variable speed."""
     page.type(selector, text, delay=random.randint(50, 80))
 
 
@@ -40,7 +37,6 @@ def _wait_for_response(page: Page, timeout: float = 10.0) -> None:
 
 
 def _send_message(page: Page, text: str) -> None:
-    """Type a message in chat input and send it."""
     _human_type(page, "#chatInput", text)
     time.sleep(0.3)
     try:
@@ -50,53 +46,34 @@ def _send_message(page: Page, text: str) -> None:
 
 
 def _get_element_center(page: Page, selector: str) -> tuple[int, int]:
-    """Get center coordinates of an element."""
     box = page.locator(selector).bounding_box()
     if box is None:
         raise ValueError(f"Element {selector} not found or not visible")
     return int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2)
 
 
-def _wait_remaining(start: float, segment_duration: float) -> None:
-    """Sleep for the remainder of a segment's duration.
-
-    If the action took longer than the segment, skip (don't sleep negative).
-    """
-    elapsed = time.monotonic() - start
-    remaining = segment_duration - elapsed
-    if remaining > 0:
-        time.sleep(remaining)
+def _scroll_chat(page: Page) -> None:
+    page.evaluate(
+        'document.getElementById("chatBody").scrollTop = '
+        'document.getElementById("chatBody").scrollHeight'
+    )
 
 
 # ── Action functions ─────────────────────────────────────────────────
-# Each takes (page,) and performs one visual step.
-# The caller handles timing via _wait_remaining().
-
-def _action_intro(page: Page) -> None:
-    """Page is visible, viewer reads the landing page."""
-    pass  # Just hold — page already loaded
-
 
 def _action_open_chat(page: Page) -> None:
-    """Move to chat FAB and click it open."""
     cx, cy = _get_element_center(page, "#chatFab")
     _smooth_move(page, cx, cy)
     page.click("#chatFab")
     page.wait_for_selector(".chat-window.open", timeout=5000)
 
 
-def _action_ask_insurance(page: Page) -> None:
-    """Type and send the insurance question."""
+def _action_type_insurance(page: Page) -> None:
     _send_message(page, "Do you accept Delta Dental insurance?")
-
-
-def _action_insurance_response(page: Page) -> None:
-    """Wait for bot response, viewer reads it."""
     _wait_for_response(page)
 
 
-def _action_book_appt(page: Page) -> None:
-    """Click the Book Appointment quick button."""
+def _action_click_booking(page: Page) -> None:
     try:
         btn = page.locator('.quick-btn:has-text("Book Appointment")')
         if btn.count() > 0:
@@ -107,41 +84,24 @@ def _action_book_appt(page: Page) -> None:
             _send_message(page, "How do I book an appointment?")
     except Exception:
         _send_message(page, "How do I book an appointment?")
-
-
-def _action_appt_response(page: Page) -> None:
-    """Wait for bot response, viewer reads it."""
     _wait_for_response(page)
 
 
-def _action_ask_hours(page: Page) -> None:
-    """Type and send the hours question."""
+def _action_type_hours(page: Page) -> None:
     _send_message(page, "What are your hours on Saturday?")
-
-
-def _action_hours_response(page: Page) -> None:
-    """Wait for bot response, viewer reads it."""
     _wait_for_response(page)
 
 
 def _action_trigger_form(page: Page) -> None:
-    """Send unmatchable message to trigger lead capture form."""
     _send_message(page, "hello there")
     _wait_for_response(page)
-    page.evaluate(
-        'document.getElementById("chatBody").scrollTop = '
-        'document.getElementById("chatBody").scrollHeight'
-    )
+    _scroll_chat(page)
     try:
         page.wait_for_selector(".lead-form", timeout=8000)
     except Exception:
-        # Retry with a different unmatchable message
         _send_message(page, "hi")
         _wait_for_response(page)
-        page.evaluate(
-            'document.getElementById("chatBody").scrollTop = '
-            'document.getElementById("chatBody").scrollHeight'
-        )
+        _scroll_chat(page)
         try:
             page.wait_for_selector(".lead-form", timeout=8000)
         except Exception:
@@ -149,12 +109,8 @@ def _action_trigger_form(page: Page) -> None:
 
 
 def _action_form_fill(page: Page) -> None:
-    """Fill out the lead capture form fields."""
     try:
-        page.evaluate(
-            'document.getElementById("chatBody").scrollTop = '
-            'document.getElementById("chatBody").scrollHeight'
-        )
+        _scroll_chat(page)
         time.sleep(0.3)
         _human_type(page, "#leadName", "Sarah Johnson")
         time.sleep(0.3)
@@ -166,60 +122,56 @@ def _action_form_fill(page: Page) -> None:
 
 
 def _action_submit(page: Page) -> None:
-    """Click the lead form submit button."""
     try:
         page.click(".lead-form button")
     except Exception:
         pass
 
 
-def _action_closing(page: Page) -> None:
-    """Hold on the confirmation message."""
-    pass  # Just hold — viewer reads the thank-you
-
-
-# ── Segment → action mapping ────────────────────────────────────────
+# ── Action registry ──────────────────────────────────────────────────
 
 DENTAL_ACTIONS: dict[str, Callable[[Page], None]] = {
-    "intro": _action_intro,
     "open_chat": _action_open_chat,
-    "ask_insurance": _action_ask_insurance,
-    "insurance_response": _action_insurance_response,
-    "book_appt": _action_book_appt,
-    "appt_response": _action_appt_response,
-    "ask_hours": _action_ask_hours,
-    "hours_response": _action_hours_response,
+    "type_insurance": _action_type_insurance,
+    "click_booking": _action_click_booking,
+    "type_hours": _action_type_hours,
     "trigger_form": _action_trigger_form,
     "form_fill": _action_form_fill,
     "submit": _action_submit,
-    "closing": _action_closing,
 }
 
 
-# ── Main recorder ───────────────────────────────────────────────────
+# ── Timestamp-driven recorder ───────────────────────────────────────
+
+def _wait_until(target_ts: float, rec_start: float) -> None:
+    """Wait until target_ts seconds have elapsed since rec_start."""
+    elapsed = time.monotonic() - rec_start
+    remaining = target_ts - elapsed
+    if remaining > 0:
+        time.sleep(remaining)
+
 
 def record_demo(
     demo_url: str,
-    segments: list[SegmentInfo],
+    cue_sheet: list[CuePoint],
+    total_duration: float,
     output_dir: Path,
     viewport: tuple[int, int] = (1920, 1080),
     action_map: dict[str, Callable[[Page], None]] | None = None,
 ) -> Path:
-    """Record a demo video with segment-driven timing.
+    """Record a demo video with cue-sheet-driven timing.
 
-    Each voiceover segment maps to an action. The recorder:
-    1. Starts a timer for the segment
-    2. Executes the action
-    3. Waits exactly (segment_duration - elapsed) before next segment
-
-    This guarantees voice and screen are in sync.
+    Each cue point fires at its exact timestamp from recording start.
+    The voiceover audio is laid over the recording in the compositor —
+    they're in sync because the cues came from the voiceover alignment.
 
     Args:
         demo_url: URL of the live chatbot demo
-        segments: list of SegmentInfo with durations for timing
+        cue_sheet: list of CuePoint(action, timestamp) from voiceover alignment
+        total_duration: total voiceover duration (recording stops after this + buffer)
         output_dir: directory for output video
-        viewport: (width, height) for the browser window
-        action_map: segment_id → action function (default: DENTAL_ACTIONS)
+        viewport: (width, height) for browser window
+        action_map: action_name → callable (default: DENTAL_ACTIONS)
 
     Returns:
         Path to recorded WebM video file
@@ -243,26 +195,29 @@ def record_demo(
         print(f"  [recorder] Loading demo page ({vw}x{vh})...")
         page.goto(demo_url, wait_until="networkidle")
 
-        # Execute each segment action, gated by voiceover duration
-        for seg in segments:
-            action = action_map.get(seg.id)
-            if action is None:
-                print(f"  [recorder] Warning: no action for segment '{seg.id}', waiting...")
-                time.sleep(seg.duration_sec)
+        # Start the clock — this is t=0, same as voiceover start
+        rec_start = time.monotonic()
+
+        # Fire each cue at its exact timestamp
+        for cue in cue_sheet:
+            action_fn = action_map.get(cue.action)
+            if action_fn is None:
+                print(f"  [recorder] Warning: no handler for '{cue.action}'")
                 continue
 
-            print(f"  [recorder] [{seg.id}] ({seg.duration_sec:.1f}s)")
-            seg_start = time.monotonic()
-            action(page)
-            _wait_remaining(seg_start, seg.duration_sec)
+            _wait_until(cue.timestamp, rec_start)
+            elapsed = time.monotonic() - rec_start
+            print(f"  [recorder] [{cue.action}] @ {elapsed:.1f}s (target: {cue.timestamp:.1f}s)")
+            action_fn(page)
 
-        # Close browser to finalize recording
+        # Hold until voiceover ends + 2s buffer
+        _wait_until(total_duration + 2.0, rec_start)
+
         print("  [recorder] Finalizing recording...")
         video_path = page.video.path()
         context.close()
         browser.close()
 
-    # Playwright saves as WebM; find the file
     final_path = Path(video_path) if video_path else None
     if final_path and final_path.exists():
         print(f"  [recorder] Video saved: {final_path}")
