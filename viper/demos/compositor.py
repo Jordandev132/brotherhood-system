@@ -57,7 +57,11 @@ def composite_vertical(
     output_dir: Path,
     business_name: str,
 ) -> Path:
-    """Composite vertical (1080x1920) from mobile recording with branded bars."""
+    """Composite vertical (1080x1920) from mobile recording.
+
+    No header/footer overlays — the page's own branding is already visible
+    in the mobile recording. Just scale to fill 1080x1920 cleanly.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     video = VideoFileClip(str(video_path))
@@ -71,73 +75,31 @@ def composite_vertical(
 
     v_width = 1080
     total_h = 1920
-    header_h = 160
-    footer_h = 160
-    content_h = total_h - header_h - footer_h  # 1600px for video content
 
-    # Scale mobile recording (390x844) to fill content area width
+    # Scale mobile recording to fill width
     scaled = video.resized(width=v_width)
-    # If scaled height exceeds content area, crop vertically
-    if scaled.h > content_h:
-        scaled = scaled.cropped(x1=0, y1=0, x2=v_width, y2=content_h)
 
-    # Header bar — branded
-    header_bg = ColorClip(
-        size=(v_width, header_h),
-        color=(37, 99, 235),
-    ).with_duration(scaled.duration)
+    if scaled.h >= total_h:
+        # Recording is taller than 1920 — crop from top to keep chat visible
+        # (chat is the main content, hero header is less important)
+        crop_top = scaled.h - total_h
+        scaled = scaled.cropped(x1=0, y1=crop_top, x2=v_width, y2=scaled.h)
+    else:
+        # Recording is shorter — center vertically on black background
+        bg = ColorClip(
+            size=(v_width, total_h),
+            color=(248, 250, 252),
+        ).with_duration(scaled.duration)
+        y_offset = (total_h - scaled.h) // 2
+        scaled = CompositeVideoClip(
+            [bg, scaled.with_position((0, y_offset))],
+            size=(v_width, total_h),
+        )
 
-    header_text = TextClip(
-        text=business_name,
-        font_size=44,
-        color="white",
-        font=_FONT_BOLD,
-    ).with_duration(scaled.duration).with_position(("center", 50))
-
-    subtitle_text = TextClip(
-        text="AI Assistant Demo",
-        font_size=24,
-        color="white",
-        font=_FONT_REGULAR,
-    ).with_duration(scaled.duration).with_position(("center", 110))
-
-    # Footer bar — CTA
-    footer_bg = ColorClip(
-        size=(v_width, footer_h),
-        color=(37, 99, 235),
-    ).with_duration(scaled.duration)
-
-    footer_text = TextClip(
-        text="Get this for your business",
-        font_size=32,
-        color="white",
-        font=_FONT_BOLD,
-    ).with_duration(scaled.duration).with_position(("center", 60))
-
-    footer_y = total_h - footer_h
-
-    # Background
-    bg = ColorClip(
-        size=(v_width, total_h),
-        color=(248, 250, 252),
-    ).with_duration(scaled.duration)
-
-    vertical = CompositeVideoClip(
-        [
-            bg,
-            header_bg.with_position((0, 0)),
-            header_text,
-            subtitle_text,
-            scaled.with_position((0, header_h)),
-            footer_bg.with_position((0, footer_y)),
-            footer_text.with_position(("center", footer_y + 60)),
-        ],
-        size=(v_width, total_h),
-    ).with_audio(audio)
-
+    final = scaled.with_audio(audio)
     v_path = output_dir / "dental_demo_vertical.mp4"
 
-    vertical.write_videofile(
+    final.write_videofile(
         str(v_path),
         fps=30,
         codec="libx264",
