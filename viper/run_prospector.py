@@ -40,12 +40,26 @@ def main() -> int:
     parser.add_argument("--no-enrich", action="store_true", help="Skip website scraping")
     parser.add_argument("--headless", default="true", help="Browser mode (true/false)")
     parser.add_argument("--delay", type=float, default=2.5, help="Seconds between Maps scrolls")
+    parser.add_argument(
+        "--auto-outreach", action="store_true",
+        help="Auto-send cold emails to prospects scored >= 7 via SendGrid",
+    )
+    parser.add_argument(
+        "--outreach-dry-run", action="store_true",
+        help="Compose outreach messages but don't actually send (preview mode)",
+    )
+    parser.add_argument(
+        "--demo-slug", default="",
+        help="Demo URL slug (e.g., 'belknapdental-com'). Auto-generated if not set.",
+    )
     args = parser.parse_args()
 
     headless = args.headless.lower() != "false"
+    has_outreach = args.auto_outreach or args.outreach_dry_run
+    total_steps = 6 if has_outreach else 5
 
     # Step 1 — Google Maps discovery
-    print(f"\n[1/5] Searching Google Maps: \"{args.niche}\" in {args.city} ...")
+    print(f"\n[1/{total_steps}] Searching Google Maps: \"{args.niche}\" in {args.city} ...")
     try:
         listings = discover_businesses(
             niche=args.niche,
@@ -74,7 +88,7 @@ def main() -> int:
 
         if not args.no_enrich and listing.website_url:
             pct = int(i / total * 100)
-            print(f"  [2/5] Enriching {i}/{total} ({pct}%) — {listing.business_name[:40]}", end="\r")
+            print(f"  [2/{total_steps}] Enriching {i}/{total} ({pct}%) — {listing.business_name[:40]}", end="\r")
 
             try:
                 scraped = scrape_business(listing.website_url)
@@ -100,18 +114,31 @@ def main() -> int:
         prospect = build_prospect(listing, scraped, chatbot, score)
         prospects.append(prospect)
 
-    print(f"\n[3/5] Scored {len(prospects)} prospects")
+    print(f"\n[3/{total_steps}] Scored {len(prospects)} prospects")
 
     # Sort by score descending
     prospects.sort(key=lambda p: p.score, reverse=True)
 
-    # Step 5 — Write output
+    # Step 4 — Write output
     out_path = write_prospects(prospects, args.niche, args.city)
-    print(f"[4/5] Saved to {out_path}")
+    print(f"[4/{total_steps}] Saved to {out_path}")
 
-    # Terminal summary
-    print("[5/5] Results:")
+    # Step 5 — Terminal summary
+    print(f"[5/{total_steps}] Results:")
     print_summary(prospects)
+
+    # Step 6 — Auto-outreach (if enabled)
+    if has_outreach:
+        print(f"[6/{total_steps}] Auto-outreach...")
+        from viper.outreach.outreach_engine import run_outreach
+        stats = run_outreach(
+            prospects=prospects,
+            niche=args.niche,
+            city=args.city,
+            min_score=7.0,
+            demo_slug=args.demo_slug,
+            dry_run=args.outreach_dry_run,
+        )
 
     return 0
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from viper.demos.compositor import composite
 from viper.demos.recorder import record_with_verify, verify_demo, DENTAL_ACTIONS
+from viper.demos.video_verifier import verify_video, DENTAL_FRAME_CHECKS
 from viper.demos.voiceover import generate_voiceover, load_cached_voiceover
 
 
@@ -96,7 +97,12 @@ def _load_api_key() -> str:
     return api_key
 
 
-def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Path, Path]:
+def generate_demo(
+    config: DemoConfig,
+    skip_voiceover: bool = False,
+    max_pipeline_retries: int = 3,
+    notify_jordan: bool = True,
+) -> tuple[Path, Path]:
     """Generate a complete demo video — self-verifying, auto-retry.
 
     Pipeline:
@@ -104,7 +110,9 @@ def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Pat
         2. Generate/load voiceover with character-level timestamps
         3. Record desktop + mobile with retry (up to 3 attempts each)
         4. Composite video + audio
-        5. Print PASS/FAIL
+        5. OCR-verify final video (extract frames at cue timestamps)
+        6. If verification fails → retry from step 3 (up to max_pipeline_retries)
+        7. Notify Jordan only when DONE or after all retries exhausted
 
     Returns:
         tuple of (horizontal_mp4, vertical_mp4)
@@ -121,6 +129,11 @@ def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Pat
         for f in result.failures:
             print(f"  [verify]   - {f}")
         print("\n  FAIL — chatbot verification failed. Fix the chatbot before recording.")
+        if notify_jordan:
+            _notify_jordan(
+                f"Demo FAIL — chatbot broken for {config.business_name}. "
+                f"Failures: {'; '.join(result.failures[:3])}"
+            )
         raise RuntimeError(f"Chatbot verification failed: {result.summary()}")
     print(f"  [verify] All {result.checks_run} checks passed")
 
@@ -139,50 +152,121 @@ def generate_demo(config: DemoConfig, skip_voiceover: bool = False) -> tuple[Pat
             config.script_text, config.cues, api_key, vo_dir,
         )
 
-    # Step 3: Record with retry
-    print("\n=== Step 3a: Recording desktop (1920x1080) ===")
-    rec_desktop = config.output_dir / "recording_desktop"
-    video_path = record_with_verify(
-        config.demo_url, vo_result.cue_sheet, vo_result.duration_sec,
-        rec_desktop, viewport=(1920, 1080),
-    )
+    # Steps 3-5: Record + Composite + Verify (with retry loop)
+    h_path = None
+    v_path = None
+    last_verify_result = None
 
-    print("\n=== Step 3b: Recording mobile (390x844) ===")
-    rec_mobile = config.output_dir / "recording_mobile"
-    mobile_video_path = record_with_verify(
-        config.demo_url, vo_result.cue_sheet, vo_result.duration_sec,
-        rec_mobile, viewport=(390, 844),
-    )
+    for attempt in range(1, max_pipeline_retries + 1):
+        print(f"\n{'='*60}")
+        print(f"  PIPELINE ATTEMPT {attempt}/{max_pipeline_retries}")
+        print(f"{'='*60}")
 
-    # Step 4: Composite
-    print("\n=== Step 4: Compositing final videos ===")
-    h_path, v_path = composite(
-        video_path, vo_result.audio_path, config.output_dir, config.business_name,
-        vertical_video_path=mobile_video_path,
-    )
+        # Step 3a: Record desktop
+        print("\n=== Step 3a: Recording desktop (1920x1080) ===")
+        rec_desktop = config.output_dir / "recording_desktop"
+        video_path = record_with_verify(
+            config.demo_url, vo_result.cue_sheet, vo_result.duration_sec,
+            rec_desktop, viewport=(1920, 1080),
+        )
 
-    # Step 5: Final status
-    h_ok = h_path.exists() and h_path.stat().st_size > 100_000
-    v_ok = v_path.exists() and v_path.stat().st_size > 100_000
+        # Step 3b: Record mobile
+        print("\n=== Step 3b: Recording mobile (390x844) ===")
+        rec_mobile = config.output_dir / "recording_mobile"
+        mobile_video_path = record_with_verify(
+            config.demo_url, vo_result.cue_sheet, vo_result.duration_sec,
+            rec_mobile, viewport=(390, 844),
+        )
 
+        # Step 4: Composite
+        print("\n=== Step 4: Compositing final videos ===")
+        h_path, v_path = composite(
+            video_path, vo_result.audio_path, config.output_dir, config.business_name,
+            vertical_video_path=mobile_video_path,
+        )
+
+        h_ok = h_path.exists() and h_path.stat().st_size > 100_000
+        v_ok = v_path.exists() and v_path.stat().st_size > 100_000
+
+        if not (h_ok and v_ok):
+            reason = []
+            if not h_ok:
+                reason.append("horizontal.mp4 missing or too small")
+            if not v_ok:
+                reason.append("vertical.mp4 missing or too small")
+            print(f"  Composite failed: {'; '.join(reason)}")
+            if attempt < max_pipeline_retries:
+                print("  Retrying...")
+                continue
+            else:
+                msg = "; ".join(reason)
+                if notify_jordan:
+                    _notify_jordan(
+                        f"Demo FAIL — video composite failed for {config.business_name} "
+                        f"after {max_pipeline_retries} attempts. {msg}"
+                    )
+                raise RuntimeError(f"Pipeline failed after {max_pipeline_retries} attempts: {msg}")
+
+        # Step 5: OCR-verify final video
+        print("\n=== Step 5: OCR-verifying final video ===")
+        last_verify_result = verify_video(
+            h_path, vo_result.cue_sheet, DENTAL_FRAME_CHECKS,
+        )
+        print(f"  {last_verify_result.summary()}")
+
+        if last_verify_result.passed:
+            break
+
+        # Show failures
+        for f in last_verify_result.failures:
+            print(f"  [ocr-fail] {f}")
+
+        if attempt < max_pipeline_retries:
+            print(f"\n  OCR verification failed — retrying ({attempt}/{max_pipeline_retries})...")
+        else:
+            print(f"\n  OCR verification failed after {max_pipeline_retries} attempts.")
+
+    # Step 6: Final status + notification
     print()
-    if h_ok and v_ok:
+    if last_verify_result and last_verify_result.passed and h_path and v_path:
         h_mb = h_path.stat().st_size / 1_048_576
         v_mb = v_path.stat().st_size / 1_048_576
         print(f"  PASS — horizontal.mp4 ({h_mb:.1f}MB) and vertical.mp4 ({v_mb:.1f}MB) ready")
         print(f"  Horizontal: {h_path}")
         print(f"  Vertical:   {v_path}")
+        if notify_jordan:
+            _notify_jordan(
+                f"Demo DONE for {config.business_name}. "
+                f"Videos verified (OCR passed). "
+                f"H: {h_mb:.1f}MB, V: {v_mb:.1f}MB"
+            )
     else:
-        reason = []
-        if not h_ok:
-            reason.append("horizontal.mp4 missing or too small")
-        if not v_ok:
-            reason.append("vertical.mp4 missing or too small")
-        msg = "; ".join(reason)
-        print(f"  FAIL — {msg}")
-        raise RuntimeError(f"Pipeline failed: {msg}")
+        if notify_jordan:
+            failures_str = "; ".join(
+                last_verify_result.failures[:3]
+            ) if last_verify_result else "unknown"
+            _notify_jordan(
+                f"Demo FAIL for {config.business_name} after "
+                f"{max_pipeline_retries} attempts. Failures: {failures_str}"
+            )
+        raise RuntimeError(
+            f"Pipeline failed after {max_pipeline_retries} attempts: "
+            f"{last_verify_result.summary() if last_verify_result else 'no verify result'}"
+        )
 
     return h_path, v_path
+
+
+def _notify_jordan(message: str) -> None:
+    """Send Telegram notification to Jordan."""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path.home()))
+        from shared.telegram_notify import notify, NotifyType, Urgency
+        notify(NotifyType.ALERT, message, Urgency.IMMEDIATE)
+    except Exception as e:
+        print(f"  [TG FALLBACK] {message}")
+        print(f"  [TG ERROR] {e}")
 
 
 def main() -> None:
