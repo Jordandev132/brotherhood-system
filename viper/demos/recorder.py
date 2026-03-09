@@ -27,14 +27,6 @@ def _human_type(page: Page, selector: str, text: str) -> None:
     page.type(selector, text, delay=random.randint(50, 80))
 
 
-def _wait_for_response(page: Page, timeout: float = 10.0) -> None:
-    """Wait for bot typing indicator to appear and disappear."""
-    try:
-        page.wait_for_selector("#typingIndicator", timeout=timeout * 1000)
-        page.wait_for_selector("#typingIndicator", state="detached", timeout=timeout * 1000)
-    except Exception:
-        time.sleep(1.5)
-
 
 def _send_message(page: Page, text: str) -> None:
     _human_type(page, "#chatInput", text)
@@ -70,7 +62,6 @@ def _action_open_chat(page: Page) -> None:
 
 def _action_type_insurance(page: Page) -> None:
     _send_message(page, "Do you accept Delta Dental insurance?")
-    _wait_for_response(page)
 
 
 def _action_click_booking(page: Page) -> None:
@@ -84,19 +75,14 @@ def _action_click_booking(page: Page) -> None:
             _send_message(page, "How do I book an appointment?")
     except Exception:
         _send_message(page, "How do I book an appointment?")
-    _wait_for_response(page)
 
 
 def _action_type_hours(page: Page) -> None:
     _send_message(page, "What are your hours on Saturday?")
-    _wait_for_response(page)
 
 
 def _action_trigger_form(page: Page) -> None:
     _send_message(page, "Is Dr. Kim available for a consultation this week?")
-    _wait_for_response(page)
-    _scroll_chat(page)
-    page.wait_for_selector(".lead-form", timeout=8000)
 
 
 def _action_form_fill(page: Page) -> None:
