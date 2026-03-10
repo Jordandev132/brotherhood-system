@@ -225,7 +225,7 @@ def run_outreach(
     Nothing sends without Jordan's YES.
     """
     niche_key = resolve_niche_key(niche)
-    stats = {"queued": 0, "queued_no_email": 0, "skipped": 0, "already_contacted": 0}
+    stats = {"queued": 0, "skipped": 0, "already_contacted": 0}
 
     qualified = [p for p in prospects if p.score >= min_score]
     if not qualified:
@@ -241,11 +241,14 @@ def run_outreach(
             stats["skipped"] += 1
             continue
 
-        # Flag no-email leads but don't skip — Jordan reviews them
-        no_email = not p.email
+        # No email = hard skip. Jordan doesn't want leads without emails.
+        if not p.email:
+            log.info("Skipping %s — no email found", p.business_name)
+            stats["skipped"] += 1
+            continue
 
-        # Dedup check (only if we have an email)
-        if p.email and already_contacted(p.email, niche, city):
+        # Dedup check
+        if already_contacted(p.email, niche, city):
             log.info("Already contacted %s — skipping", p.business_name)
             stats["already_contacted"] += 1
             continue
@@ -303,16 +306,11 @@ def run_outreach(
 
         # Send Gate 1 TG approval request to Jordan (lead info only)
         _send_approval_request(lead_id, p, niche_key)
-        if no_email:
-            stats["queued_no_email"] += 1
-            print(f"  [outreach] Queued {p.business_name} (NO EMAIL — needs contact form) → TG sent (lead {lead_id})")
-        else:
-            stats["queued"] += 1
-            print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
+        stats["queued"] += 1
+        print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
 
-    print(f"\n  [outreach] Done: {stats['queued']} queued (with email), "
-          f"{stats['queued_no_email']} queued (no email — manual outreach), "
-          f"{stats['skipped']} skipped (chatbot), "
+    print(f"\n  [outreach] Done: {stats['queued']} queued, "
+          f"{stats['skipped']} skipped (no email/chatbot/bad greeting), "
           f"{stats['already_contacted']} already contacted")
 
     return stats
