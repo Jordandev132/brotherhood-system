@@ -16,9 +16,12 @@ No reply in 24h → auto-skip, notify Jordan.
 """
 from __future__ import annotations
 
+import json
 import logging
-import sys
+import os
 from pathlib import Path
+
+import requests
 
 from viper.outreach.sendgrid_mailer import send_email
 from viper.outreach.templates import get_outreach_message, resolve_niche_key
@@ -30,77 +33,96 @@ log = logging.getLogger(__name__)
 # Demo URL base — GitHub Pages
 _DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
 
+# Telegram Bot API — read from env or Shelby's .env
+_TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-def _notify_jordan(message: str) -> None:
-    """Send Telegram notification to Jordan via shared notifier."""
+if not _TG_TOKEN:
+    # Try loading from Shelby's .env as fallback
+    _shelby_env = Path.home() / "shelby" / ".env"
+    if _shelby_env.exists():
+        for line in _shelby_env.read_text().splitlines():
+            if line.startswith("TELEGRAM_BOT_TOKEN="):
+                _TG_TOKEN = line.split("=", 1)[1].strip()
+            elif line.startswith("TELEGRAM_CHAT_ID="):
+                _TG_CHAT_ID = line.split("=", 1)[1].strip()
+
+
+def _send_tg(text: str, buttons: list[list[dict]] | None = None) -> bool:
+    """Send a Telegram message with optional inline keyboard buttons."""
+    if not _TG_TOKEN or not _TG_CHAT_ID:
+        log.warning("TG credentials not configured")
+        return False
+
+    url = f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage"
+    payload: dict = {
+        "chat_id": _TG_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+    if buttons:
+        payload["reply_markup"] = json.dumps({
+            "inline_keyboard": buttons,
+        })
+
     try:
-        sys.path.insert(0, str(Path.home()))
-        from shared.telegram_notify import notify, NotifyType, Urgency
-        notify(NotifyType.ALERT, message, Urgency.IMMEDIATE)
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            return True
+        log.error("TG API error %d: %s", resp.status_code, resp.text[:200])
+        return False
     except Exception as e:
-        log.warning("TG notification failed: %s — printing instead", e)
-        print(f"  [TG] {message}")
+        log.error("TG send failed: %s", e)
+        return False
 
 
 def _send_approval_request(lead_id: str, prospect, niche_key: str) -> None:
     """Gate 1: Send TG message with lead info only. YES/NO buttons."""
-    try:
-        sys.path.insert(0, str(Path.home()))
-        from shelby.core.telegram import get_bot
+    chatbot_line = "No" if prospect.chatbot_confidence == "NOT_FOUND" else "Unknown (scanner uncertain)"
 
-        chatbot_line = "No" if prospect.chatbot_confidence == "NOT_FOUND" else "Unknown (scanner uncertain)"
+    text = (
+        f"<b>GATE 1 — New Lead</b>\n\n"
+        f"Business: {prospect.business_name}\n"
+        f"Niche: {niche_key}\n"
+        f"Email: {prospect.email}\n"
+        f"Has chatbot: {chatbot_line}\n"
+        f"Score: {prospect.score}/10\n\n"
+        f"Approve this lead?"
+    )
 
-        text = (
-            f"GATE 1 — New Lead\n\n"
-            f"Business: {prospect.business_name}\n"
-            f"Niche: {niche_key}\n"
-            f"Email: {prospect.email}\n"
-            f"Has chatbot: {chatbot_line}\n"
-            f"Score: {prospect.score}/10\n\n"
-            f"Approve this lead?"
-        )
+    buttons = [
+        [
+            {"text": "YES — build email", "callback_data": f"outreach_yes:{lead_id}"},
+            {"text": "NO — skip", "callback_data": f"outreach_no:{lead_id}"},
+        ],
+    ]
 
-        buttons = [
-            [
-                {"text": "YES — build email", "callback_data": f"outreach_yes:{lead_id}"},
-                {"text": "NO — skip", "callback_data": f"outreach_no:{lead_id}"},
-            ],
-        ]
-
-        bot = get_bot()
-        bot.send_with_keyboard(text, buttons)
+    if _send_tg(text, buttons):
         log.info("Gate 1 sent for %s (lead %s)", prospect.business_name, lead_id)
-    except Exception as e:
-        log.error("Failed to send Gate 1 TG for %s: %s", prospect.business_name, e)
+    else:
         print(f"  [TG FALLBACK] Gate 1 approval needed for {prospect.business_name} ({prospect.email}) — lead_id: {lead_id}")
 
 
 def send_draft_review(lead: dict) -> None:
     """Gate 2: Send TG message with full email draft. GO/SKIP buttons."""
-    try:
-        sys.path.insert(0, str(Path.home()))
-        from shelby.core.telegram import get_bot
+    text = (
+        f"<b>GATE 2 — Email Draft</b>\n\n"
+        f"To: {lead['email']} ({lead['business_name']})\n"
+        f"Subject: {lead['subject']}\n\n"
+        f"{lead['body']}\n\n"
+        f"Send this email?"
+    )
 
-        text = (
-            f"GATE 2 — Email Draft\n\n"
-            f"To: {lead['email']} ({lead['business_name']})\n"
-            f"Subject: {lead['subject']}\n\n"
-            f"{lead['body']}\n\n"
-            f"Send this email?"
-        )
+    buttons = [
+        [
+            {"text": "GO — send it", "callback_data": f"outreach_go:{lead['id']}"},
+            {"text": "SKIP — don't send", "callback_data": f"outreach_skip:{lead['id']}"},
+        ],
+    ]
 
-        buttons = [
-            [
-                {"text": "GO — send it", "callback_data": f"outreach_go:{lead['id']}"},
-                {"text": "SKIP — don't send", "callback_data": f"outreach_skip:{lead['id']}"},
-            ],
-        ]
-
-        bot = get_bot()
-        bot.send_with_keyboard(text, buttons)
+    if _send_tg(text, buttons):
         log.info("Gate 2 draft sent for %s (lead %s)", lead["business_name"], lead["id"])
-    except Exception as e:
-        log.error("Failed to send Gate 2 TG for %s: %s", lead["business_name"], e)
+    else:
         print(f"  [TG FALLBACK] Gate 2 draft review needed for {lead['business_name']} — lead_id: {lead['id']}")
 
 
