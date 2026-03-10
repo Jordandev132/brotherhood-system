@@ -377,8 +377,8 @@ def _extract_team(soup: BeautifulSoup, text: str, biz: ScrapedBusiness) -> None:
         "professional", "comprehensive", "emergency", "routine",
     }
 
-    # Match "Dr. Firstname Lastname" — strict: exactly 2 name parts after Dr.
-    dr_pattern = re.findall(r'Dr\.?\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)', text)
+    # Match "Dr. Firstname Lastname" — strict: 3+ chars per name part
+    dr_pattern = re.findall(r'Dr\.?\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})', text)
     for first, last in dr_pattern:
         if first.lower() in _NOT_NAMES or last.lower() in _NOT_NAMES:
             continue
