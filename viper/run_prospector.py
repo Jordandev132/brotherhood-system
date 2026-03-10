@@ -19,6 +19,7 @@ from viper.prospecting.prospect_writer import (
     print_summary,
 )
 from viper.demos.scraper import scrape_business, ScrapedBusiness
+from viper.sources.hunter import find_emails, extract_domain
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +107,20 @@ def main() -> int:
                     chatbot = detect_chatbot(raw)
 
             time.sleep(_SITE_DELAY)
+
+        # Hunter.io fallback — if no email found from scraping, try domain lookup
+        if scraped and not scraped.email and listing.website_url:
+            domain = extract_domain(listing.website_url)
+            if domain:
+                hunter_results = find_emails(domain, limit=2)
+                if hunter_results:
+                    best = hunter_results[0]
+                    scraped.email = best["email"]
+                    # Store contact name from Hunter if we don't have one
+                    name = f"{best.get('first_name', '')} {best.get('last_name', '')}".strip()
+                    if name and not scraped.team_members:
+                        scraped.team_members.append(name)
+                    log.info("Hunter.io found email for %s: %s", listing.business_name, scraped.email)
 
         # Step 3 — Score
         score = score_prospect(listing, scraped, chatbot)

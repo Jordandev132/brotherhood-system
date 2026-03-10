@@ -80,11 +80,22 @@ def _send_approval_request(lead_id: str, prospect, niche_key: str) -> None:
     """Gate 1: Send TG message with lead info only. YES/NO buttons."""
     chatbot_line = "No" if prospect.chatbot_confidence == "NOT_FOUND" else "Unknown (scanner uncertain)"
 
+    email_line = prospect.email if prospect.email else "NO EMAIL FOUND"
+    contact_line = ""
+    if not prospect.email:
+        form_url = getattr(prospect, "contact_form_url", "")
+        if form_url:
+            contact_line = f"\nContact form: {form_url}"
+        else:
+            contact_line = "\nNeeds manual lookup (contact form on site)"
+
     text = (
         f"<b>GATE 1 — New Lead</b>\n\n"
         f"Business: {prospect.business_name}\n"
         f"Niche: {niche_key}\n"
-        f"Email: {prospect.email}\n"
+        f"Email: {email_line}{contact_line}\n"
+        f"Website: {prospect.website}\n"
+        f"Phone: {prospect.phone}\n"
         f"Has chatbot: {chatbot_line}\n"
         f"Score: {prospect.score}/10\n\n"
         f"Approve this lead?"
@@ -164,7 +175,7 @@ def run_outreach(
     Nothing sends without Jordan's YES.
     """
     niche_key = resolve_niche_key(niche)
-    stats = {"queued": 0, "skipped": 0, "already_contacted": 0}
+    stats = {"queued": 0, "queued_no_email": 0, "skipped": 0, "already_contacted": 0}
 
     qualified = [p for p in prospects if p.score >= min_score]
     if not qualified:
@@ -180,14 +191,11 @@ def run_outreach(
             stats["skipped"] += 1
             continue
 
-        # Must have email
-        if not p.email:
-            log.debug("Skipping %s — no email", p.business_name)
-            stats["skipped"] += 1
-            continue
+        # Flag no-email leads but don't skip — Jordan reviews them
+        no_email = not p.email
 
-        # Dedup check
-        if already_contacted(p.email, niche, city):
+        # Dedup check (only if we have an email)
+        if p.email and already_contacted(p.email, niche, city):
             log.info("Already contacted %s — skipping", p.business_name)
             stats["already_contacted"] += 1
             continue
@@ -230,11 +238,16 @@ def run_outreach(
 
         # Send Gate 1 TG approval request to Jordan (lead info only)
         _send_approval_request(lead_id, p, niche_key)
-        stats["queued"] += 1
-        print(f"  [outreach] Queued {p.business_name} → TG sent to Jordan (lead {lead_id})")
+        if no_email:
+            stats["queued_no_email"] += 1
+            print(f"  [outreach] Queued {p.business_name} (NO EMAIL — needs contact form) → TG sent (lead {lead_id})")
+        else:
+            stats["queued"] += 1
+            print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
 
-    print(f"\n  [outreach] Done: {stats['queued']} queued for Jordan's approval, "
-          f"{stats['skipped']} skipped (chatbot/no email), "
+    print(f"\n  [outreach] Done: {stats['queued']} queued (with email), "
+          f"{stats['queued_no_email']} queued (no email — manual outreach), "
+          f"{stats['skipped']} skipped (chatbot), "
           f"{stats['already_contacted']} already contacted")
 
     return stats
