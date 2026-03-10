@@ -1,13 +1,13 @@
-"""Outreach engine — orchestrates the Viper→Shelby auto-outreach pipeline.
+"""Outreach engine — orchestrates the Viper→Shelby→Jordan approval pipeline.
 
-When Viper finds a prospect scored >= 7:
-1. Check if already contacted (dedup)
-2. Build personalized outreach message
-3. Send via SendGrid
-4. Log in SQLite
-5. Notify Jordan via Telegram
+Flow for every qualified lead:
+1. DETECTED chatbot → auto-skip (never spam someone with a chatbot)
+2. NOT_FOUND / UNCERTAIN → queue for Jordan's approval on Telegram
+3. Jordan taps YES → Shelby sends email via Resend
+4. Jordan taps NO → lead logged as declined
+5. No reply in 24h → auto-skip, notify Jordan
 
-Jordan only gets involved when a prospect replies.
+Jordan's only job: reply YES or NO on Telegram.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pathlib import Path
 from viper.outreach.sendgrid_mailer import send_email
 from viper.outreach.templates import get_outreach_message, resolve_niche_key
 from viper.outreach.outreach_log import already_contacted, log_outreach
+from viper.outreach.approval_queue import queue_lead
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +37,69 @@ def _notify_jordan(message: str) -> None:
         print(f"  [TG] {message}")
 
 
+def _send_approval_request(lead_id: str, prospect, niche_key: str, msg: dict, demo_url: str) -> None:
+    """Send TG message with YES/NO buttons for Jordan's approval."""
+    try:
+        sys.path.insert(0, str(Path.home()))
+        from shelby.core.telegram import get_bot
+
+        chatbot_line = "No" if prospect.chatbot_confidence == "NOT_FOUND" else "Unknown (scanner uncertain)"
+
+        text = (
+            f"New Lead\n\n"
+            f"Business: {prospect.business_name}\n"
+            f"Niche: {niche_key}\n"
+            f"Email: {prospect.email}\n"
+            f"Has chatbot: {chatbot_line}\n"
+            f"Score: {prospect.score}/10\n\n"
+            f"Message ready to send:\n"
+            f"Subject: {msg['subject']}\n\n"
+            f"{msg['body'][:500]}\n\n"
+            f"Reply:\n"
+            f"YES — send it\n"
+            f"NO — skip it"
+        )
+
+        buttons = [
+            [
+                {"text": "YES — send it", "callback_data": f"outreach_yes:{lead_id}"},
+                {"text": "NO — skip it", "callback_data": f"outreach_no:{lead_id}"},
+            ],
+        ]
+
+        bot = get_bot()
+        bot.send_with_keyboard(text, buttons)
+        log.info("Sent approval request for %s (lead %s)", prospect.business_name, lead_id)
+    except Exception as e:
+        log.error("Failed to send TG approval for %s: %s", prospect.business_name, e)
+        print(f"  [TG FALLBACK] Approval needed for {prospect.business_name} ({prospect.email}) — lead_id: {lead_id}")
+
+
+def send_approved_email(lead: dict) -> dict:
+    """Send the actual email for an approved lead. Called by Shelby callback."""
+    result = send_email(
+        to_email=lead["email"],
+        subject=lead["subject"],
+        body=lead["body"],
+        to_name=lead.get("contact_name", ""),
+    )
+
+    log_outreach(
+        business_name=lead["business_name"],
+        email=lead["email"],
+        niche=lead["niche"],
+        city=lead["city"],
+        subject=lead["subject"],
+        score=lead["score"],
+        demo_url=lead["demo_url"],
+        sendgrid_status=result["status_code"],
+        error=result.get("error", ""),
+        prospect_data=lead.get("prospect_data", {}),
+    )
+
+    return result
+
+
 def run_outreach(
     prospects: list,
     niche: str,
@@ -44,27 +108,16 @@ def run_outreach(
     demo_slug: str = "",
     dry_run: bool = False,
 ) -> dict:
-    """Send outreach emails to qualified prospects.
+    """Queue outreach leads for Jordan's Telegram approval.
 
-    Args:
-        prospects: list of LocalProspect objects (from prospect_writer)
-        niche: search niche (e.g., "dental practice")
-        city: search city (e.g., "Dover NH")
-        min_score: minimum score to qualify (default 7.0)
-        demo_slug: slug for demo URL (e.g., "belknapdental-com")
-        dry_run: if True, compose messages but don't actually send
-
-    Returns:
-        dict with 'sent', 'skipped', 'failed', 'already_contacted' counts
+    Nothing sends without Jordan's YES.
     """
     niche_key = resolve_niche_key(niche)
-    stats = {"sent": 0, "skipped": 0, "failed": 0, "already_contacted": 0, "uncertain": 0}
-    sent_names = []
-    uncertain_names = []
+    stats = {"queued": 0, "skipped": 0, "already_contacted": 0}
 
     qualified = [p for p in prospects if p.score >= min_score]
     if not qualified:
-        print(f"  No prospects scored >= {min_score}. Nothing to send.")
+        print(f"  No prospects scored >= {min_score}. Nothing to queue.")
         return stats
 
     print(f"\n  [outreach] {len(qualified)} prospects qualify (score >= {min_score})")
@@ -88,18 +141,10 @@ def run_outreach(
             stats["already_contacted"] += 1
             continue
 
-        # UNCERTAIN = flag for Jordan, don't auto-send
-        if p.chatbot_confidence == "UNCERTAIN":
-            uncertain_names.append(p.business_name)
-            stats["uncertain"] += 1
-            print(f"  [outreach] UNCERTAIN: {p.business_name} — flagged for Jordan review")
-            continue
-
         # Build demo URL
         if demo_slug:
             demo_url = f"{_DEMO_BASE}{demo_slug}/"
         else:
-            # Generate slug from business name
             slug = p.business_name.lower().replace(" ", "-").replace(".", "")
             slug = "".join(c for c in slug if c.isalnum() or c == "-")
             demo_url = f"{_DEMO_BASE}{slug}/"
@@ -113,68 +158,32 @@ def run_outreach(
         )
 
         if dry_run:
-            print(f"  [DRY RUN] Would email {p.email}: {msg['subject']}")
-            stats["sent"] += 1
-            sent_names.append(p.business_name)
+            print(f"  [DRY RUN] Would queue {p.business_name} ({p.email}) for Jordan approval")
+            stats["queued"] += 1
             continue
 
-        # Send
-        result = send_email(
-            to_email=p.email,
-            subject=msg["subject"],
-            body=msg["body"],
-            to_name=p.contact_name,
-        )
-
-        # Log
-        log_outreach(
+        # Queue for approval
+        lead_id = queue_lead(
             business_name=p.business_name,
             email=p.email,
             niche=niche,
             city=city,
-            subject=msg["subject"],
             score=p.score,
+            chatbot_confidence=p.chatbot_confidence,
+            subject=msg["subject"],
+            body=msg["body"],
             demo_url=demo_url,
-            sendgrid_status=result["status_code"],
-            error=result.get("error", ""),
+            contact_name=p.contact_name,
             prospect_data=p.to_dict(),
         )
 
-        if result["success"]:
-            stats["sent"] += 1
-            sent_names.append(p.business_name)
-            print(f"  [outreach] Sent to {p.business_name} ({p.email})")
-        else:
-            stats["failed"] += 1
-            print(f"  [outreach] FAILED {p.business_name}: {result['error']}")
+        # Send TG approval request to Jordan
+        _send_approval_request(lead_id, p, niche_key, msg, demo_url)
+        stats["queued"] += 1
+        print(f"  [outreach] Queued {p.business_name} → TG sent to Jordan (lead {lead_id})")
 
-    # Notify Jordan — sent summary
-    if stats["sent"] > 0:
-        names_str = ", ".join(sent_names[:5])
-        if len(sent_names) > 5:
-            names_str += f" +{len(sent_names) - 5} more"
-        prefix = "[DRY RUN] " if dry_run else ""
-        _notify_jordan(
-            f"{prefix}Viper outreach: {stats['sent']} emails sent to "
-            f"{niche} businesses in {city}. "
-            f"Targets: {names_str}"
-        )
-
-    # Notify Jordan — uncertain leads need review
-    if uncertain_names:
-        names_str = ", ".join(uncertain_names[:5])
-        if len(uncertain_names) > 5:
-            names_str += f" +{len(uncertain_names) - 5} more"
-        _notify_jordan(
-            f"UNCERTAIN leads ({len(uncertain_names)}): scanner couldn't confirm chatbot status. "
-            f"Review needed: {names_str}. "
-            f"Check data/prospects/ JSON for details."
-        )
-
-    print(f"\n  [outreach] Done: {stats['sent']} sent, "
-          f"{stats['skipped']} skipped (has chatbot/no email), "
-          f"{stats['uncertain']} uncertain (Jordan reviews), "
-          f"{stats['failed']} failed, "
+    print(f"\n  [outreach] Done: {stats['queued']} queued for Jordan's approval, "
+          f"{stats['skipped']} skipped (chatbot/no email), "
           f"{stats['already_contacted']} already contacted")
 
     return stats
