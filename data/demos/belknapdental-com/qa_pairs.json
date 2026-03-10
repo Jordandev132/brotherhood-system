@@ -46,7 +46,12 @@
       "concordia",
       "bento",
       "sunlife",
-      "assurant"
+      "assurant",
+      "insurance companies",
+      "what insurance",
+      "which insurance",
+      "insurance do you",
+      "accept insurance"
     ],
     "category": "insurance"
   },
@@ -158,7 +163,11 @@
       "carecredit",
       "care credit",
       "out of network",
-      "out-of-network"
+      "out-of-network",
+      "offer finance",
+      "offer financing",
+      "finance option",
+      "financing option"
     ],
     "category": "billing"
   },
@@ -202,7 +211,10 @@
       "dr",
       "doctors",
       "how many",
-      "meet the team"
+      "meet the team",
+      "docs",
+      "how many docs",
+      "how many doctors"
     ],
     "category": "team"
   },
@@ -219,7 +231,10 @@
       "dr",
       "works there",
       "how many",
-      "meet the team"
+      "meet the team",
+      "docs",
+      "how many docs",
+      "how many doctors"
     ],
     "category": "doctor"
   },
