@@ -60,11 +60,12 @@
     "answer": "At Belknap Dental Associates, we offer General Dentistry, Cosmetic Dentistry, Teeth Whitening, Dental Implants, Orthodontics, Root Canal, Crowns, Dentures. We're here for all your dental needs!",
     "keywords": [
       "services",
-      "offer",
+      "what do you offer",
       "provide",
       "do you do",
       "treatments",
-      "procedures"
+      "procedures",
+      "services do you"
     ],
     "category": "services"
   },
@@ -167,7 +168,11 @@
       "offer finance",
       "offer financing",
       "finance option",
-      "financing option"
+      "financing option",
+      "financing",
+      "pay for",
+      "how to pay",
+      "financing available"
     ],
     "category": "billing"
   },
@@ -406,7 +411,11 @@
       "care credit",
       "financing",
       "finance",
-      "payment plan"
+      "payment plan",
+      "offer finance",
+      "offer financing",
+      "pay for",
+      "financing available"
     ],
     "category": "billing"
   },
@@ -432,5 +441,47 @@
       "online schedule"
     ],
     "category": "booking"
+  },
+  {
+    "question": "What is your phone number?",
+    "answer": "You can reach us at 603-742-4735. We're happy to help!",
+    "keywords": [
+      "phone",
+      "phone number",
+      "your phone",
+      "call you",
+      "telephone",
+      "your number",
+      "number"
+    ],
+    "category": "contact"
+  },
+  {
+    "question": "What is your email?",
+    "answer": "For email inquiries, visit belknapdental.com to use our contact form, or call us directly at 603-742-4735.",
+    "keywords": [
+      "email",
+      "email address",
+      "your email",
+      "e-mail",
+      "mail"
+    ],
+    "category": "contact"
+  },
+  {
+    "question": "What is your contact info?",
+    "answer": "Here's how to reach us:\n\nPhone: 603-742-4735\nAddress: 40 Chestnut St #2, Dover, NH 03820\nWebsite: belknapdental.com\n\nWe're open Mon-Thu 7:30 AM - 4:30 PM.",
+    "keywords": [
+      "contact info",
+      "contact information",
+      "how to contact",
+      "reach you",
+      "get in touch",
+      "contact details",
+      "how do i contact",
+      "how do i reach",
+      "contact"
+    ],
+    "category": "contact"
   }
 ]
