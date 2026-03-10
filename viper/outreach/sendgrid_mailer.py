@@ -10,7 +10,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_FROM = "DarkCode AI <darkcodeai@proton.me>"
+_DEFAULT_FROM = "DarkCode AI <jordan@darkcodeai.com>"
 
 
 def _load_config() -> tuple[str, str]:
