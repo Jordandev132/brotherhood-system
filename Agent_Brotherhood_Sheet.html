@@ -402,6 +402,7 @@
     <div class="skills-grid">
       <div class="skill-group"><div class="skill-group-name">Code Generation</div><ul class="skill-list"><li>Read codebase, generate code</li><li>Auto-escalate Sonnet to Opus</li><li>Test runner + validation</li><li>AutoFix pipeline (test &rarr; fix &rarr; validate)</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">Task System</div><ul class="skill-list"><li>File-based task queue from Shelby</li><li>Priority: normal/high/critical</li><li>Results with test outcomes</li><li>Reflexion memory (learns from mistakes)</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">Client Site Crawler (NEW)</div><ul class="skill-list"><li>Cloudflare /crawl — 100 pages per client</li><li>Auto-extract: services, FAQ, staff, hours, locations</li><li>Auto-extract: insurance, pricing, booking, contact</li><li>Auto-generate chatbot knowledge base</li><li>Save to data/client_sites/{slug}.json</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">Knowledge</div><ul class="skill-list"><li>Atlas research feed integration</li><li>Codebase index (semantic search)</li><li>Smart actions generator</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">Integration</div><ul class="skill-list"><li>Progress sheet auto-update (Excel)</li><li>Dashboard auto-update</li><li>Git commit + push</li><li>Event bus publisher</li></ul></div>
     </div>
@@ -420,24 +421,25 @@
     <div class="status-badge status-live">LIVE</div>
   </div>
   <div class="agent-body">
-    <div class="voice">"113 HN leads scanned. Reddit/Vollna/Alerts not configured — staying quiet. No noise."</div>
+    <div class="voice">"116 leads scanned. 35 garbage killed. 1 real lead found. Noise filter at 30% kill rate — working clean."</div>
     <div class="intel-section">
       <div class="intel-title">Intelligence Meter</div>
       <div class="intel-grid">
-        <div class="intel-item"><span class="intel-label">Lead Scanning</span><div class="intel-bar-bg"><div class="intel-bar" style="width:86%;background:var(--viper);"></div></div><span class="intel-val">86</span></div>
+        <div class="intel-item"><span class="intel-label">Lead Scanning</span><div class="intel-bar-bg"><div class="intel-bar" style="width:92%;background:var(--viper);"></div></div><span class="intel-val">92</span></div>
         <div class="intel-item"><span class="intel-label">Claude Scoring</span><div class="intel-bar-bg"><div class="intel-bar" style="width:82%;background:var(--viper);"></div></div><span class="intel-val">82</span></div>
-        <div class="intel-item"><span class="intel-label">Source Control</span><div class="intel-bar-bg"><div class="intel-bar" style="width:92%;background:var(--viper);"></div></div><span class="intel-val">92</span></div>
+        <div class="intel-item"><span class="intel-label">Garbage Filtering</span><div class="intel-bar-bg"><div class="intel-bar" style="width:95%;background:var(--viper);"></div></div><span class="intel-val">95</span></div>
         <div class="intel-item"><span class="intel-label">Cost Governance</span><div class="intel-bar-bg"><div class="intel-bar" style="width:88%;background:var(--viper);"></div></div><span class="intel-val">88</span></div>
-        <div class="intel-item"><span class="intel-label">Noise Filtering</span><div class="intel-bar-bg"><div class="intel-bar" style="width:90%;background:var(--viper);"></div></div><span class="intel-val">90</span></div>
+        <div class="intel-item"><span class="intel-label">TG Routing</span><div class="intel-bar-bg"><div class="intel-bar" style="width:90%;background:var(--viper);"></div></div><span class="intel-val">90</span></div>
       </div>
-      <div class="intel-overall"><span class="lbl">Overall:</span><span class="val">88</span></div>
+      <div class="intel-overall"><span class="lbl">Overall:</span><span class="val">91</span></div>
     </div>
     <div class="section-label">Skills</div>
     <div class="skills-grid">
-      <div class="skill-group"><div class="skill-group-name">Lead Engine (V2 Rebuild)</div><ul class="skill-list"><li>5 approved sources only (killed RemoteOK, WWR, Freelancer)</li><li>Reddit PRAW (needs API keys)</li><li>HN Algolia (free, always active)</li><li>Upwork via Vollna webhooks</li><li>Google Alerts RSS feeds</li><li>Manual inbox (gig_inbox.json)</li><li>Source credential checks — unconfigured = quiet</li><li>Full-time/salary job filter</li></ul></div>
-      <div class="skill-group"><div class="skill-group-name">Claude Scoring Pipeline</div><ul class="skill-list"><li>Claude Haiku batch scoring</li><li>Composite score 1-10</li><li>Score 8-10: immediate TG alert</li><li>Score 6-7: daily digest</li><li>Score 1-5: logged only</li><li>Deduplication via hash</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">Pipeline 2 — Inbound Lead Scanner</div><ul class="skill-list"><li>7 sources: HN, Google Alerts, Reddit, IndieHackers, ProductHunt, RemoteOK, WWR</li><li>Full-time/salary job filter</li><li>6-layer garbage filter: competitor, news domains, big companies, ProductHunt, GoogleAlerts intent, HN freelancer threads</li><li>Reddit [FOR HIRE] early-exit</li><li>Claude Haiku scoring (1-100)</li><li>BID/SKIP buttons on every alert</li><li>30-min scan loop</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">Pipeline 1 — Cold Outreach</div><ul class="skill-list"><li>Google Maps prospecting (multi-city)</li><li>Cloudflare /crawl site audit (50 pages)</li><li>Chatbot detection, FAQ analysis, contact depth</li><li>Gate 1 (Jordan reviews) &rarr; Gate 2 (email sent)</li><li>URL liveness checks on all links</li><li>Demo-before-pitch: URL &rarr; scrape &rarr; Q&A &rarr; HTML &rarr; deploy</li><li>2 POC demos live: Belknap Dental, Great Island Realty</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">TG Channel Router (NEW)</div><ul class="skill-list"><li>INBOUND channel: Pipeline 2 leads</li><li>OUTREACH channel: Pipeline 1 prospects</li><li>Fallback: prefix labels until channels created</li><li>BID/SKIP callback handlers in Shelby</li><li>mark_lead_status() tracks Jordan's decisions</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">Notification Format</div><ul class="skill-list"><li>INBOUND LEAD: Company, Website, Need, Budget, Score/10, Source, Fit (YES/MAYBE/NO)</li><li>BID/SKIP inline buttons on every lead</li><li>Clean, scannable — no hashtags, no noise</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">LLM Cost Governor</div><ul class="skill-list"><li>Per-agent daily budget ($12/day cap)</li><li>Auto-downgrade: 80% &rarr; local, 100% &rarr; small</li><li>Cost spike detection (3x &rarr; alert)</li><li>ROI scoring (PnL / LLM cost)</li></ul></div>
-      <div class="skill-group"><div class="skill-group-name">Notifications</div><ul class="skill-list"><li>All via shared/telegram_notify.py (Shelby TG)</li><li>No separate Viper TG bot/channel</li><li>notify_lead() for high-score alerts</li><li>30-min scan loop interval</li></ul></div>
     </div>
   </div>
 </div>
