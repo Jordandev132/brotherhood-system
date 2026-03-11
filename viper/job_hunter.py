@@ -80,6 +80,96 @@ _SALARY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# --- Garbage lead filter (Pipeline 2 quality gate) ---
+
+_COMPETITOR_RE = re.compile(
+    r"\[for\s+hire\]|\[seeking\s+work\]|"
+    r"\bhire\s+me\b|\bi\s+offer\b|\bavailable\s+for\b|"
+    r"\bi\s+am\s+a\s+freelanc|\bmy\s+services\b|\bi\s+can\s+build\b",
+    re.IGNORECASE,
+)
+
+_NEWS_DOMAINS = frozenset([
+    "techcrunch.com", "itpro.com", "wired.com", "theverge.com",
+    "zdnet.com", "venturebeat.com", "mashable.com", "cnet.com",
+    "reuters.com", "bloomberg.com", "forbes.com", "medium.com",
+    "hackernoon.com", "dev.to", "wikipedia.org", "github.com",
+    "stackoverflow.com", "arstechnica.com", "engadget.com",
+    "thenextweb.com", "gizmodo.com", "businessinsider.com",
+    "cnbc.com", "bbc.com", "nytimes.com",
+])
+
+_BIG_COMPANIES = [
+    "google", "meta", "facebook", "amazon", "apple", "microsoft",
+    "salesforce", "oracle", "ibm", "netflix", "uber", "lyft",
+    "airbnb", "stripe", "shopify", "slack", "twilio", "palantir",
+    "snowflake", "datadog", "cloudflare", "atlassian", "adobe",
+    "intel", "nvidia", "amd", "cisco", "vmware", "dell",
+]
+
+_HIRING_INTENT_RE = re.compile(
+    r"\[hiring\]|\bneed\s+someone\b|\bbudget\s*\$|\blooking\s+to\s+hire\b|"
+    r"\bhiring\s+a\b|\bwant\s+to\s+hire\b|\bseeking\s+a\s+(developer|freelancer|contractor)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_garbage_lead(job: dict) -> tuple[bool, str]:
+    """Return (True, reason) if this lead is garbage and should be filtered.
+
+    Called on EVERY job after the full-time filter, before scoring.
+    """
+    title = job.get("title", "")
+    description = job.get("description", "")
+    url = job.get("url", "")
+    source = job.get("source", "")
+    text = f"{title} {description}".lower()
+
+    # 1. Competitor detection — people offering services, not hiring
+    if _COMPETITOR_RE.search(f"{title} {description}"):
+        return True, "competitor/self-promo"
+
+    # 2. News domain blocklist — GoogleAlerts only
+    if source == "GoogleAlerts":
+        url_lower = url.lower()
+        for domain in _NEWS_DOMAINS:
+            if domain in url_lower:
+                return True, f"news domain: {domain}"
+
+    # 3. Big company filter
+    for company in _BIG_COMPANIES:
+        if f"@ {company}" in text or f"@{company}" in text:
+            return True, f"big company: {company}"
+        if title.lower().startswith(f"{company} "):
+            return True, f"big company: {company}"
+
+    # 4. ProductHunt filter — reject unless explicit hiring intent
+    if source == "ProductHunt":
+        if not _HIRING_INTENT_RE.search(f"{title} {description}"):
+            return True, "ProductHunt launch, no hiring intent"
+
+    # 5. Google Alerts intent filter — reject unless hiring intent
+    if source == "GoogleAlerts":
+        if not _HIRING_INTENT_RE.search(f"{title} {description}"):
+            # Also allow if it has coding skill keywords (some alerts are legit job posts)
+            coding_kws = ["freelance", "contractor", "project", "gig", "chatbot", "bot", "automation"]
+            if not any(kw in text for kw in coding_kws):
+                return True, "GoogleAlerts: no hiring intent"
+
+    # 6. HN freelancer thread filter — "Seeking freelancer?" = people offering, not hiring
+    if source == "HackerNews" and job.get("thread_type") == "freelancer":
+        if not _HIRING_INTENT_RE.search(f"{title} {description}"):
+            # In "Seeking freelancer?" threads, most posts are freelancers advertising
+            offering_signals = [
+                "available", "i specialize", "my portfolio", "i build",
+                "i develop", "my rate", "open to", "looking for work",
+                "seeking opportunities", "i'm a ",
+            ]
+            if any(sig in text for sig in offering_signals):
+                return True, "HN freelancer thread: offering services, not hiring"
+
+    return False, ""
+
 
 def _is_fulltime_job(title: str, description: str, budget: str, source: str) -> bool:
     """Return True if this looks like a full-time/salary position, not freelance."""
@@ -263,6 +353,7 @@ def run_scan() -> dict:
                 "suggested_bid": "Apply",
                 "suggested_delivery_days": 0,
                 "client_country": "",
+                "thread_type": hj.thread_type,
             })
     except Exception as e:
         log.error("[JOB_HUNTER] HN scan failed: %s", str(e)[:200])
@@ -567,6 +658,21 @@ def run_scan() -> dict:
 
     if fulltime_killed:
         log.info("[JOB_HUNTER] Filtered %d full-time/salary positions", fulltime_killed)
+
+    # Filter out garbage leads (news, competitors, big companies, etc.)
+    clean_jobs = []
+    garbage_killed = 0
+    for job in freelance_jobs:
+        is_garbage, reason = _is_garbage_lead(job)
+        if is_garbage:
+            garbage_killed += 1
+            log.debug("[JOB_HUNTER] Garbage filtered: %s — %s", job["title"][:60], reason)
+            continue
+        clean_jobs.append(job)
+
+    if garbage_killed:
+        log.info("[JOB_HUNTER] Filtered %d garbage leads", garbage_killed)
+    freelance_jobs = clean_jobs
 
     # Sort by score descending
     freelance_jobs.sort(key=lambda j: j["score"], reverse=True)

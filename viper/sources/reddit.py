@@ -21,6 +21,12 @@ SKIP_KEYWORDS = [
     "graphic design", "logo", "video editing", "ios", "swift", "kotlin",
 ]
 
+# Defense-in-depth: reject [FOR HIRE] / [SEEKING WORK] posts early
+_FOR_HIRE_RE = re.compile(
+    r"\[for\s+hire\]|\[seeking\s+work\]|\[seeking\s+clients?\]",
+    re.IGNORECASE,
+)
+
 SKILL_KEYWORDS = {
     "coding": [
         "python", "bot", "scraper", "scraping", "api",
@@ -123,6 +129,10 @@ def scan_reddit() -> list[RedditJob]:
                 title = post.title or ""
                 body = post.selftext or ""
                 full_text = f"{title} {body}"
+
+                # Early-exit: reject [FOR HIRE] / [SEEKING WORK] posts
+                if _FOR_HIRE_RE.search(title):
+                    continue
 
                 # Only hiring posts
                 if not HIRING_PATTERNS.search(full_text):

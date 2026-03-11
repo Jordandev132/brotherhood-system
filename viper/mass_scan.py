@@ -27,6 +27,7 @@ from viper.prospecting.prospect_writer import build_prospect, LocalProspect
 from viper.prospecting.site_auditor import audit_site, format_findings_for_email
 from viper.demos.scraper import scrape_business, ScrapedBusiness
 from viper.outreach.outreach_engine import run_outreach
+from viper.tg_router import send as tg_send
 
 try:
     from viper.sources.hunter import find_emails, extract_domain
@@ -71,28 +72,8 @@ if not _TG_TOKEN:
 
 
 def _send_tg(text: str) -> bool:
-    """Send a Telegram message to Jordan."""
-    if not _TG_TOKEN or not _TG_CHAT_ID:
-        log.warning("TG credentials not configured — printing instead")
-        print(text)
-        return False
-
-    import requests
-    url = f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": _TG_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-    }
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code == 200:
-            return True
-        log.error("TG API error %d: %s", resp.status_code, resp.text[:200])
-        return False
-    except Exception as e:
-        log.error("TG send failed: %s", e)
-        return False
+    """Send via tg_router on OUTREACH channel."""
+    return tg_send(text, channel="OUTREACH")
 
 
 # ── Single City Scan ─────────────────────────────────────────────────────

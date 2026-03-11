@@ -237,3 +237,41 @@ def write_leads(jobs: list[dict]) -> int:
     log.info("[LEAD_WRITER] Wrote %d leads (%d new, composite >= %.1f)",
              len(all_leads), len(new_leads), COMPOSITE_THRESHOLD)
     return len(new_leads)
+
+
+def mark_lead_status(lead_hash: str, status: str) -> bool:
+    """Mark a lead's status in viper_leads.json (bid/skip/contacted).
+
+    Args:
+        lead_hash: The hash prefix used in callback_data (up to 20 chars).
+        status: New status string (e.g. "bid", "skip").
+
+    Returns True if found and updated, False otherwise.
+    """
+    if not LEADS_FILE.exists():
+        return False
+
+    try:
+        data = json.loads(LEADS_FILE.read_text())
+    except Exception:
+        return False
+
+    leads = data.get("leads", [])
+    updated = False
+
+    for lead in leads:
+        h = lead.get("hash", "")
+        if h.startswith(lead_hash) or lead_hash.startswith(h[:20]):
+            lead["status"] = status
+            lead["status_updated_at"] = datetime.now(ET).isoformat()
+            updated = True
+            break
+
+    if updated:
+        data["leads"] = leads
+        LEADS_FILE.write_text(json.dumps(data, indent=2))
+        if OVERSEER_LEADS.parent.exists():
+            OVERSEER_LEADS.write_text(json.dumps(data, indent=2))
+        log.info("[LEAD_WRITER] Marked lead %s as %s", lead_hash[:8], status)
+
+    return updated

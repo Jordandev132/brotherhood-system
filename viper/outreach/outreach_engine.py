@@ -29,6 +29,7 @@ from viper.outreach.outreach_log import already_contacted, log_outreach
 from viper.outreach.approval_queue import queue_lead
 from viper.prospecting.site_auditor import format_findings_for_email
 from viper.outreach.email_sequences import create_sequence
+from viper.tg_router import send as tg_send
 
 log = logging.getLogger(__name__)
 
@@ -125,31 +126,8 @@ def _check_urls_live(text: str) -> list[str]:
 
 
 def _send_tg(text: str, buttons: list[list[dict]] | None = None) -> bool:
-    """Send a Telegram message with optional inline keyboard buttons."""
-    if not _TG_TOKEN or not _TG_CHAT_ID:
-        log.warning("TG credentials not configured")
-        return False
-
-    url = f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage"
-    payload: dict = {
-        "chat_id": _TG_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-    }
-    if buttons:
-        payload["reply_markup"] = json.dumps({
-            "inline_keyboard": buttons,
-        })
-
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code == 200:
-            return True
-        log.error("TG API error %d: %s", resp.status_code, resp.text[:200])
-        return False
-    except Exception as e:
-        log.error("TG send failed: %s", e)
-        return False
+    """Send via tg_router on OUTREACH channel."""
+    return tg_send(text, channel="OUTREACH", buttons=buttons)
 
 
 def _send_approval_request(lead_id: str, prospect, niche_key: str) -> None:

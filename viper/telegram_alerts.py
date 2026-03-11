@@ -1,54 +1,41 @@
-"""Viper Telegram alerts — sends job leads and summaries to Jordan."""
+"""Viper Telegram alerts — sends job leads and summaries to Jordan.
+
+Uses tg_router for channel routing (INBOUND channel for Pipeline 2 leads).
+"""
 from __future__ import annotations
 
-import json
 import logging
-import os
-from pathlib import Path
 
-import requests
+from viper.tg_router import send as tg_send
 
 log = logging.getLogger(__name__)
 
-# Load TG credentials from env or Shelby's .env
-_TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-_TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# Source emoji map
+_SOURCE_EMOJI = {
+    "HackerNews": "Y",
+    "GoogleAlerts": "G",
+    "Reddit": "R",
+    "IndieHackers": "IH",
+    "ProductHunt": "PH",
+    "n8n_community": "n8n",
+    "Make_community": "Make",
+    "RemoteOK": "ROK",
+    "WeWorkRemotely": "WWR",
+}
 
-if not _TG_TOKEN:
-    _shelby_env = Path.home() / "shelby" / ".env"
-    if _shelby_env.exists():
-        for line in _shelby_env.read_text().splitlines():
-            if line.startswith("TELEGRAM_BOT_TOKEN="):
-                _TG_TOKEN = line.split("=", 1)[1].strip()
-            elif line.startswith("TELEGRAM_CHAT_ID="):
-                _TG_CHAT_ID = line.split("=", 1)[1].strip()
+
+def _score_bar(score: int) -> str:
+    """Build a visual score bar like ████████░░ 85/100."""
+    filled = score // 10
+    empty = 10 - filled
+    return "\u2588" * filled + "\u2591" * empty + f" {score}/100"
 
 
-def _send_tg(text: str, buttons: list[list[dict]] | None = None) -> bool:
-    """Send a Telegram message with optional inline keyboard."""
-    if not _TG_TOKEN or not _TG_CHAT_ID:
-        log.warning("[TG] Credentials not configured")
-        return False
-
-    url = f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage"
-    payload: dict = {
-        "chat_id": _TG_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    if buttons:
-        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
-
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code == 200:
-            return True
-        log.error("[TG] API error %d: %s", resp.status_code, resp.text[:200])
-        return False
-    except Exception as e:
-        log.error("[TG] Send failed: %s", e)
-        return False
+def _skill_tags(skills: list[str]) -> str:
+    """Build hashtag string from skills like #chatbot #automation #ai."""
+    if not skills:
+        return ""
+    return " ".join(f"#{s.replace(' ', '_')}" for s in skills[:5])
 
 
 def send_job_alert(
@@ -66,29 +53,34 @@ def send_job_alert(
     client_country: str = "",
     job_hash: str = "",
 ) -> bool:
-    """Send a job lead alert to Jordan's TG with BID/SKIP buttons."""
-    skills_str = ", ".join(skills[:6]) if skills else "—"
-    bid_str = f"\nBids: {bid_count}" if bid_count is not None else ""
-    country_str = f"\nClient: {client_country}" if client_country else ""
-    budget_str = f"\nBudget: {budget}" if budget else ""
-    bid_suggest = f"\nSuggested bid: {suggested_bid}" if suggested_bid else ""
-    delivery_str = f"\nDelivery: {suggested_delivery}" if suggested_delivery else ""
+    """Send a clean, compact job lead alert to Jordan's TG with BID/SKIP."""
+    source_tag = _SOURCE_EMOJI.get(source, source)
+    score_bar = _score_bar(score)
+    tags = _skill_tags(skills)
 
-    # Truncate description
-    desc_preview = description[:200].replace("<", "&lt;").replace(">", "&gt;") if description else ""
-    desc_block = f"\n\n{desc_preview}..." if desc_preview else ""
+    # Budget line
+    budget_line = f"Budget: {budget}" if budget else ""
 
-    text = (
-        f"<b>VIPER LEAD — {source}</b>\n\n"
-        f"<b>{title[:100]}</b>\n"
-        f"Category: {category}\n"
-        f"Skills: {skills_str}\n"
-        f"Score: {score}/100"
-        f"{budget_str}{bid_str}{country_str}"
-        f"{bid_suggest}{delivery_str}"
-        f"{desc_block}\n\n"
-        f"<a href=\"{url}\">View posting</a>"
-    )
+    # Description preview (150 chars)
+    desc_clean = description[:150].replace("<", "&lt;").replace(">", "&gt;") if description else ""
+    desc_line = f"{desc_clean}..." if desc_clean else ""
+
+    # Build the compact message
+    lines = [
+        f"<b>{source_tag} | {title[:100]}</b>",
+        f"<code>{score_bar}</code>",
+    ]
+    if tags:
+        lines.append(tags)
+    if budget_line:
+        lines.append(budget_line)
+    lines.append("")
+    if desc_line:
+        lines.append(desc_line)
+        lines.append("")
+    lines.append(f'<a href="{url}">Open</a>')
+
+    text = "\n".join(lines)
 
     buttons = [
         [
@@ -97,7 +89,7 @@ def send_job_alert(
         ],
     ]
 
-    return _send_tg(text, buttons)
+    return tg_send(text, channel="INBOUND", buttons=buttons)
 
 
 def send_summary(total_scanned: int, new_matches: int, alerts_sent: int) -> bool:
@@ -108,4 +100,4 @@ def send_summary(total_scanned: int, new_matches: int, alerts_sent: int) -> bool
         f"Matches (score 70+): {new_matches}\n"
         f"Alerts sent: {alerts_sent}"
     )
-    return _send_tg(text)
+    return tg_send(text, channel="INBOUND")
