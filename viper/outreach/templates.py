@@ -3,12 +3,20 @@
 Rules:
 - Sound human, not robotic. Write like a real person, not a template.
 - Lead with THEIR problem, not our product.
-- Video links ONLY for niches with verified videos (real_estate).
+- Video previews (mobile + desktop) in EVERY email.
 - Demo link in every email — it's the hook.
-- Mention SEO/content writing as bonus value.
 - Short. Scannable. Every sentence earns the next.
+- NO pitching SEO/content writing in cold emails.
 """
 from __future__ import annotations
+
+_DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
+
+# Verified demo slugs — these return 200 on GitHub Pages
+_DEMO_SLUGS = {
+    "dental": "dental-demo",
+    "real_estate": "realestate-demo",
+}
 
 
 def get_outreach_message(
@@ -20,16 +28,12 @@ def get_outreach_message(
 ) -> dict[str, str]:
     """Return personalized subject + body for a niche.
 
-    Args:
-        findings: Pre-formatted audit findings string (bulleted list).
-                  Injected into the email body via {findings} placeholder.
-
     Returns dict with 'subject' and 'body' keys (plain text).
     """
     greeting = f"Hi {contact_name}" if contact_name else "Hi"
-    template = _TEMPLATES.get(niche.lower(), _TEMPLATES["general"])
+    niche_key = resolve_niche_key(niche) if niche not in _TEMPLATES else niche
+    template = _TEMPLATES.get(niche_key, _TEMPLATES["general"])
 
-    # Build findings block — only if we have actual findings
     findings_block = ""
     if findings:
         findings_block = (
@@ -37,10 +41,12 @@ def get_outreach_message(
             f"a few things:\n\n{findings}\n\n"
         )
 
-    # Video block — only for niches with verified videos
-    video_block = ""
-    if niche.lower() in _VIDEO_NICHES:
-        video_block = _VIDEO_NICHES[niche.lower()].format(demo_url=demo_url)
+    # Video block for every niche — uses the demo_url to build video paths
+    video_block = (
+        "Here's a 30-second walkthrough so you can see it in action:\n"
+        f"  Horizontal: {demo_url}videos/desktop-preview.mp4\n"
+        f"  Vertical: {demo_url}videos/mobile-preview.mp4\n"
+    )
 
     return {
         "subject": template["subject"].format(business_name=business_name),
@@ -52,16 +58,6 @@ def get_outreach_message(
             video_block=video_block,
         ),
     }
-
-
-# Video preview blocks — ONLY niches with verified working mp4s
-_VIDEO_NICHES: dict[str, str] = {
-    "real_estate": (
-        "\nHere's a 30-second walkthrough so you can see it in action:\n"
-        "  Mobile: {demo_url}videos/mobile-preview.mp4\n"
-        "  Desktop: {demo_url}videos/desktop-preview.mp4\n"
-    ),
-}
 
 
 _TEMPLATES: dict[str, dict[str, str]] = {
@@ -77,11 +73,9 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             "handles what. Works 24/7, even when you're closed.\n\n"
             "Here's the live demo (takes 30 seconds to try):\n"
             "{demo_url}\n\n"
-            "I also do SEO and content writing for dental practices — "
-            "blog posts that actually rank, Google Business optimization, "
-            "the stuff that gets new patients finding you online.\n\n"
+            "{video_block}\n"
             "If you're curious, just reply to this email. I'll build a custom "
-            "version for {business_name} in 24 hours — free, no strings.\n\n"
+            "version for {business_name} within 24 hours — free, no strings.\n\n"
             "Jordan\n"
             "DarkCode AI\n"
             "darkcodeai.carrd.co"
@@ -99,11 +93,8 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             "answers property questions, and captures their info before "
             "they disappear. It's trained on YOUR listings and services.\n\n"
             "Here's a working demo:\n"
-            "{demo_url}\n"
+            "{demo_url}\n\n"
             "{video_block}\n"
-            "I also handle SEO and content for real estate — neighborhood "
-            "guides, market update blogs, the content that gets you ranking "
-            "above the Zillows and Redfins for local searches.\n\n"
             "Reply if you want me to build one for {business_name}. Takes "
             "me 24 hours, costs you nothing to try.\n\n"
             "Jordan\n"
@@ -124,9 +115,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             "appointments — even at 2 AM.\n\n"
             "Here's a working demo:\n"
             "{demo_url}\n\n"
-            "I also write content that ranks — treatment pages, blog posts "
-            "about common conditions, the stuff that brings in organic "
-            "traffic without paying for ads.\n\n"
+            "{video_block}\n"
             "Want me to build one for {business_name}? Reply and I'll "
             "have a custom version ready in 24 hours. Free to try.\n\n"
             "Jordan\n"
@@ -147,9 +136,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             "on the spot. Works 24/7.\n\n"
             "Here's a working demo:\n"
             "{demo_url}\n\n"
-            "I also do SEO for auto shops — getting you ranking for "
-            "'brake repair near me', 'oil change [your city]', the "
-            "searches that bring in real customers.\n\n"
+            "{video_block}\n"
             "Interested? Reply and I'll build a custom version for "
             "{business_name}. 24 hours, no cost to try.\n\n"
             "Jordan\n"
@@ -169,9 +156,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             "that never sleeps.\n\n"
             "Here's the live demo (takes 30 seconds):\n"
             "{demo_url}\n\n"
-            "I also handle SEO and content writing — blog posts, landing "
-            "pages, Google Business optimization. The stuff that brings "
-            "in organic traffic without ad spend.\n\n"
+            "{video_block}\n"
             "Worth a look? Reply and I'll customize it for "
             "{business_name} in 24 hours. Free, no strings.\n\n"
             "Jordan\n"
