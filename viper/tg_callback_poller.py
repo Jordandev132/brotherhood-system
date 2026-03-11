@@ -38,6 +38,21 @@ def _load_bot_tokens() -> dict[str, str]:
     return tokens
 
 
+def _find_lead_by_hash(lead_hash: str) -> dict | None:
+    """Find a lead in viper_leads.json by hash prefix."""
+    leads_file = Path.home() / "polymarket-bot" / "data" / "viper_leads.json"
+    if not leads_file.exists():
+        return None
+    try:
+        data = json.loads(leads_file.read_text())
+        for lead in data.get("leads", []):
+            if lead.get("hash", "").startswith(lead_hash):
+                return lead
+    except Exception:
+        pass
+    return None
+
+
 def _handle_callback(bot_token: str, update: dict) -> None:
     """Handle a single callback query from a Viper bot."""
     cb = update.get("callback_query")
@@ -75,14 +90,21 @@ def _handle_callback(bot_token: str, update: dict) -> None:
 
 
 def _handle_bid(bot_token, cb_id, chat_id, message_id, original_text, lead_hash):
-    """BID on an inbound lead."""
+    """BID on an inbound lead — mark status + auto-generate proposal."""
     try:
         from viper.lead_writer import mark_lead_status
         found = mark_lead_status(lead_hash, "bid")
-        suffix = "\n\nBID — Jordan will follow up" if found else "\n\nBID (lead not found in DB)"
-        _answer_callback(bot_token, cb_id, "Marked as BID")
+        suffix = "\n\nBID — generating proposal..." if found else "\n\nBID (lead not found in DB)"
+        _answer_callback(bot_token, cb_id, "Generating proposal...")
         _edit_message(bot_token, chat_id, message_id, original_text + suffix)
         log.info("BID for lead %s (found=%s)", lead_hash, found)
+
+        # Auto-generate proposal
+        if found:
+            lead = _find_lead_by_hash(lead_hash)
+            if lead:
+                from viper.proposal_gen import auto_generate_for_lead
+                auto_generate_for_lead(lead)
     except Exception as e:
         log.error("BID failed for %s: %s", lead_hash, e)
         _answer_callback(bot_token, cb_id, f"Error: {e}")
