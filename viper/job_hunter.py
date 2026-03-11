@@ -1,13 +1,14 @@
-"""Viper Job Hunter — scans Freelancer, RemoteOK, WWR, HN for freelance gigs.
+"""Viper Job Hunter — scans HN, Google Alerts, Reddit, RemoteOK, WWR for freelance gigs.
 
-Runs on a schedule, classifies and scores jobs, deduplicates,
-and sends top matches to Viper's Telegram bot with bid suggestions.
+Runs on a 30-min loop, classifies and scores jobs, deduplicates,
+and sends top matches to Jordan on Telegram with bid suggestions.
 
 Sources:
-  - Freelancer.com API (real biddable projects — primary source)
-  - RemoteOK JSON API (remote jobs — filtered for freelance/contract only)
-  - We Work Remotely RSS (remote jobs — filtered for freelance/contract only)
-  - Hacker News "Who's Hiring" (monthly threads — filtered for remote + our skills)
+  - Hacker News "Who's Hiring" + "Freelancer?" threads (Algolia API, free)
+  - Google Alerts RSS (8 configured feeds)
+  - Reddit (r/forhire, r/freelance, etc.) — requires PRAW creds
+  - RemoteOK JSON API
+  - We Work Remotely RSS
 """
 from __future__ import annotations
 
@@ -21,10 +22,11 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from viper.sources.freelancer_api import scan_freelancer
 from viper.sources.remoteok import scan_remoteok
 from viper.sources.weworkremotely import scan_weworkremotely
 from viper.sources.hackernews import scan_hackernews
+from viper.sources.google_alerts import scan_google_alerts
+from viper.sources.reddit import scan_reddit
 from viper.telegram_alerts import send_job_alert, send_summary
 from viper.lead_writer import write_leads
 
@@ -35,24 +37,22 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 SEEN_JOBS_FILE = DATA_DIR / "viper_seen_jobs.json"
 JOB_LOG_FILE = DATA_DIR / "viper_job_log.jsonl"
 
-MIN_ALERT_SCORE = 75  # Only real opportunities — no noise
+MIN_ALERT_SCORE = 70  # 7.0/10 = send to Jordan's TG
 MAX_ALERTS_PER_CYCLE = 10
 
 # --- Full-time / salary job filter ---
-# Kill these — we're independent freelancers, not job applicants
 FULLTIME_SIGNALS = [
     "full-time", "full time", "fulltime", "fte",
     "/yr", "/year", "per year", "annual salary", "annually",
     "k/yr", "k per year", "k/year", "per annum",
     "benefits package", "401k", "401(k)", "equity",
-    "stock options", "health insurance", "dental",
+    "stock options", "health insurance",
     "paid time off", "pto", "vacation days",
     "permanent position", "permanent role",
     "w-2", "on-site", "onsite", "hybrid role",
     "relocation", "visa sponsor",
 ]
 
-# Salary patterns: $XXk, $XXX,XXX, $XX-$XXk/yr
 _SALARY_RE = re.compile(
     r"\$\d{2,3}[,.]?\d{0,3}\s*k|\$\d{3},\d{3}|\$\d{2,3}k?\s*[-–]\s*\$?\d{2,3}k?\s*/\s*y",
     re.IGNORECASE,
@@ -63,18 +63,14 @@ def _is_fulltime_job(title: str, description: str, budget: str, source: str) -> 
     """Return True if this looks like a full-time/salary position, not freelance."""
     text = f"{title} {description} {budget}".lower()
 
-    # Salary regex (catches $120k, $150,000, $80-120k/yr etc.)
     if _SALARY_RE.search(text):
         return True
 
-    # Keyword signals
     hit_count = sum(1 for sig in FULLTIME_SIGNALS if sig in text)
     if hit_count >= 2:
         return True
 
-    # Sources that are mostly full-time listings
     if source in ("RemoteOK", "WeWorkRemotely", "HackerNews"):
-        # These sources default to full-time — only keep if explicitly freelance/contract
         freelance_signals = [
             "freelance", "contract", "project", "gig",
             "part-time", "part time", "fixed price",
@@ -125,31 +121,23 @@ def _parse_budget_value(budget_str: str) -> float:
 
 
 def _suggest_bid(budget_min: float, budget_max: float, category: str, bid_count: int) -> str:
-    """Suggest a competitive bid amount based on budget and competition."""
     if budget_max <= 0 and budget_min <= 0:
         return "~$50-100"
 
     mid = (budget_min + budget_max) / 2 if budget_max > 0 else budget_min
 
-    # Bid strategy: slightly below average to be competitive
     if bid_count <= 5:
-        # Low competition — bid closer to budget max
         suggested = mid * 0.85
     elif bid_count <= 15:
-        # Medium competition — bid at midpoint
         suggested = mid * 0.75
     else:
-        # High competition — bid lower to stand out
         suggested = mid * 0.65
 
-    # Floor at $25
     suggested = max(suggested, 25)
-
     return f"${suggested:.0f}"
 
 
 def _suggest_delivery(budget_max: float, category: str, description: str) -> int:
-    """Suggest exact delivery days based on project size."""
     if budget_max <= 50:
         return 2
     elif budget_max <= 150:
@@ -218,151 +206,14 @@ def run_scan() -> dict:
     total_scanned = 0
     new_matches = 0
     alerts_sent = 0
+    source_counts: dict[str, int] = {}
 
     all_jobs: list[dict] = []
-
-    # --- Freelancer (primary source — real biddable projects) ---
-    try:
-        fl_jobs = scan_freelancer()
-        for fj in fl_jobs:
-            total_scanned += 1
-            h = _job_hash("freelancer", fj.job_id)
-            if h in seen:
-                continue
-
-            # Budget is already in USD from the scanner
-            budget_str = ""
-            if fj.budget_max_usd > 0:
-                budget_str = f"${fj.budget_min_usd:.0f}-${fj.budget_max_usd:.0f} USD"
-                if fj.currency_code != "USD":
-                    budget_str += f" ({fj.currency_code} {fj.budget_min_raw:.0f}-{fj.budget_max_raw:.0f})"
-            elif fj.budget_min_usd > 0:
-                budget_str = f"${fj.budget_min_usd:.0f} USD"
-
-            score = _score_job(
-                category=fj.category,
-                matched_skills=fj.matched_skills,
-                budget_min=fj.budget_min_usd,
-                budget_max=fj.budget_max_usd,
-                bid_count=fj.bid_count,
-            )
-
-            suggested_bid = _suggest_bid(
-                fj.budget_min_usd, fj.budget_max_usd,
-                fj.category, fj.bid_count,
-            )
-            suggested_delivery = _suggest_delivery(
-                fj.budget_max_usd, fj.category, fj.description,
-            )
-
-            # Bid in their currency, show USD to Jordan
-            bid_usd = float(suggested_bid.replace("$", "").replace(",", "")) if suggested_bid.startswith("$") else 50
-            from viper.sources.freelancer_api import CURRENCY_MAP
-            cur_code = fj.currency_code
-            _, rate = CURRENCY_MAP.get({v[0]: k for k, v in CURRENCY_MAP.items()}.get(cur_code, 1), ("USD", 1.0))
-            if rate > 0:
-                bid_local = round(bid_usd / rate) if cur_code != "USD" else bid_usd
-            else:
-                bid_local = bid_usd
-
-            all_jobs.append({
-                "source": "Freelancer",
-                "title": fj.title,
-                "description": fj.description,
-                "url": fj.url,
-                "category": fj.category,
-                "skills": fj.matched_skills,
-                "budget": budget_str,
-                "budget_usd_min": fj.budget_min_usd,
-                "budget_usd_max": fj.budget_max_usd,
-                "budget_raw_min": fj.budget_min_raw,
-                "budget_raw_max": fj.budget_max_raw,
-                "currency_code": fj.currency_code,
-                "bid_count": fj.bid_count,
-                "score": score,
-                "hash": h,
-                "suggested_bid_usd": bid_usd,
-                "suggested_bid_local": bid_local,
-                "suggested_bid": suggested_bid,
-                "suggested_delivery_days": suggested_delivery,
-                "client_country": fj.client_country,
-                "job_id": fj.job_id,
-            })
-    except Exception as e:
-        log.error("[JOB_HUNTER] Freelancer scan failed: %s", str(e)[:200])
-
-    # --- RemoteOK ---
-    try:
-        rok_jobs = scan_remoteok()
-        for rk in rok_jobs:
-            total_scanned += 1
-            h = _job_hash("remoteok", rk.job_id)
-            if h in seen:
-                continue
-            score = _score_job(
-                category=rk.category,
-                matched_skills=rk.matched_skills,
-                budget_min=rk.salary_min / 12 if rk.salary_min else 0,  # Annual → monthly
-                budget_max=rk.salary_max / 12 if rk.salary_max else 0,
-            )
-            salary_str = ""
-            if rk.salary_min and rk.salary_max:
-                salary_str = f"${rk.salary_min:,}-${rk.salary_max:,}/yr"
-            all_jobs.append({
-                "source": "RemoteOK",
-                "title": f"{rk.title} @ {rk.company}" if rk.company else rk.title,
-                "description": rk.description,
-                "url": rk.url,
-                "category": rk.category,
-                "skills": rk.matched_skills,
-                "budget": salary_str,
-                "budget_usd_min": 0,
-                "budget_usd_max": 0,
-                "bid_count": None,
-                "score": score,
-                "hash": h,
-                "suggested_bid": "Apply",
-                "suggested_delivery_days": 0,
-                "client_country": "",
-            })
-    except Exception as e:
-        log.error("[JOB_HUNTER] RemoteOK scan failed: %s", str(e)[:200])
-
-    # --- We Work Remotely ---
-    try:
-        wwr_jobs = scan_weworkremotely()
-        for wj in wwr_jobs:
-            total_scanned += 1
-            h = _job_hash("wwr", wj.job_id)
-            if h in seen:
-                continue
-            score = _score_job(
-                category=wj.category,
-                matched_skills=wj.matched_skills,
-            )
-            all_jobs.append({
-                "source": "WeWorkRemotely",
-                "title": f"{wj.title} @ {wj.company}" if wj.company else wj.title,
-                "description": wj.description,
-                "url": wj.url,
-                "category": wj.category,
-                "skills": wj.matched_skills,
-                "budget": "",
-                "budget_usd_min": 0,
-                "budget_usd_max": 0,
-                "bid_count": None,
-                "score": score,
-                "hash": h,
-                "suggested_bid": "Apply",
-                "suggested_delivery_days": 0,
-                "client_country": "",
-            })
-    except Exception as e:
-        log.error("[JOB_HUNTER] WWR scan failed: %s", str(e)[:200])
 
     # --- Hacker News "Who's Hiring" ---
     try:
         hn_jobs = scan_hackernews()
+        source_counts["HackerNews"] = len(hn_jobs)
         for hj in hn_jobs:
             total_scanned += 1
             h = _job_hash("hn", hj.comment_id)
@@ -394,7 +245,154 @@ def run_scan() -> dict:
     except Exception as e:
         log.error("[JOB_HUNTER] HN scan failed: %s", str(e)[:200])
 
-    # Filter out full-time / salary positions — we're freelancers
+    # --- Google Alerts RSS ---
+    try:
+        ga_jobs = scan_google_alerts()
+        source_counts["GoogleAlerts"] = len(ga_jobs)
+        for gj in ga_jobs:
+            total_scanned += 1
+            h = _job_hash("galerts", gj.job_id)
+            if h in seen:
+                continue
+            score = _score_job(
+                category=gj.category,
+                matched_skills=gj.matched_skills,
+            )
+            # Google Alerts are high-intent signals — bonus
+            score = min(score + 5, 100)
+            all_jobs.append({
+                "source": "GoogleAlerts",
+                "title": gj.title,
+                "description": gj.description,
+                "url": gj.url,
+                "category": gj.category,
+                "skills": gj.matched_skills,
+                "budget": "",
+                "budget_usd_min": 0,
+                "budget_usd_max": 0,
+                "bid_count": None,
+                "score": score,
+                "hash": h,
+                "suggested_bid": "Apply",
+                "suggested_delivery_days": 0,
+                "client_country": "",
+                "feed_query": gj.feed_query,
+            })
+    except Exception as e:
+        log.error("[JOB_HUNTER] Google Alerts scan failed: %s", str(e)[:200])
+
+    # --- Reddit (graceful skip if no creds) ---
+    try:
+        reddit_jobs = scan_reddit()
+        source_counts["Reddit"] = len(reddit_jobs)
+        for rj in reddit_jobs:
+            total_scanned += 1
+            h = _job_hash("reddit", rj.job_id)
+            if h in seen:
+                continue
+            budget_val = _parse_budget_value(rj.budget_hint)
+            score = _score_job(
+                category=rj.category,
+                matched_skills=rj.matched_skills,
+                budget_min=budget_val,
+                budget_str=rj.budget_hint,
+            )
+            all_jobs.append({
+                "source": "Reddit",
+                "title": rj.title,
+                "description": rj.body,
+                "url": rj.url,
+                "category": rj.category,
+                "skills": rj.matched_skills,
+                "budget": rj.budget_hint,
+                "budget_usd_min": budget_val,
+                "budget_usd_max": 0,
+                "bid_count": None,
+                "score": score,
+                "hash": h,
+                "suggested_bid": _suggest_bid(budget_val, 0, rj.category, 0),
+                "suggested_delivery_days": _suggest_delivery(budget_val, rj.category, rj.body),
+                "client_country": "",
+                "subreddit": rj.subreddit,
+            })
+    except Exception as e:
+        log.error("[JOB_HUNTER] Reddit scan failed: %s", str(e)[:200])
+
+    # --- RemoteOK ---
+    try:
+        rok_jobs = scan_remoteok()
+        source_counts["RemoteOK"] = len(rok_jobs)
+        for rk in rok_jobs:
+            total_scanned += 1
+            h = _job_hash("remoteok", rk.job_id)
+            if h in seen:
+                continue
+            score = _score_job(
+                category=rk.category,
+                matched_skills=rk.matched_skills,
+                budget_min=rk.salary_min / 12 if rk.salary_min else 0,
+                budget_max=rk.salary_max / 12 if rk.salary_max else 0,
+            )
+            salary_str = ""
+            if rk.salary_min and rk.salary_max:
+                salary_str = f"${rk.salary_min:,}-${rk.salary_max:,}/yr"
+            all_jobs.append({
+                "source": "RemoteOK",
+                "title": f"{rk.title} @ {rk.company}" if rk.company else rk.title,
+                "description": rk.description,
+                "url": rk.url,
+                "category": rk.category,
+                "skills": rk.matched_skills,
+                "budget": salary_str,
+                "budget_usd_min": 0,
+                "budget_usd_max": 0,
+                "bid_count": None,
+                "score": score,
+                "hash": h,
+                "suggested_bid": "Apply",
+                "suggested_delivery_days": 0,
+                "client_country": "",
+            })
+    except Exception as e:
+        log.error("[JOB_HUNTER] RemoteOK scan failed: %s", str(e)[:200])
+
+    # --- We Work Remotely ---
+    try:
+        wwr_jobs = scan_weworkremotely()
+        source_counts["WeWorkRemotely"] = len(wwr_jobs)
+        for wj in wwr_jobs:
+            total_scanned += 1
+            h = _job_hash("wwr", wj.job_id)
+            if h in seen:
+                continue
+            score = _score_job(
+                category=wj.category,
+                matched_skills=wj.matched_skills,
+            )
+            all_jobs.append({
+                "source": "WeWorkRemotely",
+                "title": f"{wj.title} @ {wj.company}" if wj.company else wj.title,
+                "description": wj.description,
+                "url": wj.url,
+                "category": wj.category,
+                "skills": wj.matched_skills,
+                "budget": "",
+                "budget_usd_min": 0,
+                "budget_usd_max": 0,
+                "bid_count": None,
+                "score": score,
+                "hash": h,
+                "suggested_bid": "Apply",
+                "suggested_delivery_days": 0,
+                "client_country": "",
+            })
+    except Exception as e:
+        log.error("[JOB_HUNTER] WWR scan failed: %s", str(e)[:200])
+
+    # Log source counts
+    log.info("[JOB_HUNTER] Source scan results: %s", source_counts)
+
+    # Filter out full-time / salary positions
     freelance_jobs = []
     fulltime_killed = 0
     for job in all_jobs:
@@ -412,7 +410,7 @@ def run_scan() -> dict:
     # Sort by score descending
     freelance_jobs.sort(key=lambda j: j["score"], reverse=True)
 
-    # Write to viper_leads.json for Claude Overseer
+    # Write to viper_leads.json
     try:
         new_leads = write_leads(freelance_jobs)
         log.info("[JOB_HUNTER] Wrote %d new leads to viper_leads.json", new_leads)
@@ -427,18 +425,9 @@ def run_scan() -> dict:
 
         new_matches += 1
 
-        # Format delivery and bid for display
         days = job.get("suggested_delivery_days", 0)
-        delivery_str = f"{days} days" if days else job.get("suggested_delivery", "")
+        delivery_str = f"{days} days" if days else ""
         bid_display = job.get("suggested_bid", "")
-        currency = job.get("currency_code", "USD")
-        bid_local = job.get("suggested_bid_local", 0)
-        bid_usd = job.get("suggested_bid_usd", 0)
-
-        if currency != "USD" and bid_local > 0:
-            bid_display = f"{currency} {bid_local:,.0f} (~${bid_usd:.0f} USD)"
-        elif bid_usd > 0:
-            bid_display = f"${bid_usd:.0f} USD"
 
         sent = send_job_alert(
             title=job["title"],
@@ -474,6 +463,7 @@ def run_scan() -> dict:
         "total_scanned": total_scanned,
         "new_matches": new_matches,
         "alerts_sent": alerts_sent,
+        "source_counts": source_counts,
         "timestamp": datetime.now(ET).isoformat(),
     }
     log.info(

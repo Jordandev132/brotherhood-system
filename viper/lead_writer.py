@@ -49,7 +49,7 @@ WEIGHTS = {
     "client": 0.10,
 }
 
-COMPOSITE_THRESHOLD = 6.0  # Only surface leads >= 6.0
+COMPOSITE_THRESHOLD = 7.0  # Only surface leads >= 7.0 to Jordan
 MAX_LEADS_KEPT = 50
 
 
@@ -123,8 +123,8 @@ def _score_dimensions(job: dict) -> dict:
     client_country = job.get("client_country", "")
     if source == "HackerNews":
         client = 8  # HN clients tend to be quality
-    elif source == "Freelancer" and budget >= 200:
-        client = 7
+    elif source in ("GoogleAlerts", "Reddit"):
+        client = 7  # Inbound intent signals
     elif client_country in ("US", "CA", "GB", "AU", "DE"):
         client = 7
     else:
