@@ -22,11 +22,15 @@ logging.basicConfig(
 )
 
 from viper.job_hunter import run_scan, run_loop
+from viper.tg_callback_poller import start_polling
 
 
 def main():
     log = logging.getLogger(__name__)
     interval = int(os.getenv("VIPER_JOB_SCAN_INTERVAL", "30"))
+
+    # Start BID/SKIP callback pollers for Viper bots (daemon threads)
+    start_polling()
 
     if "--loop" in sys.argv:
         log.info("Starting Viper Job Hunter loop (interval=%d min)", interval)
