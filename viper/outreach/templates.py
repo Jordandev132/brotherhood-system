@@ -44,7 +44,7 @@ def get_outreach_message(
 
     Returns dict with 'subject' and 'body' keys (plain text).
     """
-    greeting = f"Hi {contact_name}" if contact_name else "Hi"
+    greeting = f"Hi {contact_name}" if contact_name else "Hi team"
     niche_key = resolve_niche_key(niche) if niche not in _NICHE_BODIES else niche
 
     # Parse findings into individual lines
@@ -158,23 +158,17 @@ _FALLBACK_OPENERS: dict[str, str] = {
 
 
 def _build_opener(finding_lines: list[str], business_name: str, niche_key: str = "general") -> str:
-    """Build the email opener from audit findings.
+    """Build the email opener from the ONE strongest audit finding.
 
-    Line 1 = specific finding from their site.
-    Line 2+ = additional findings if available (max 2 extra).
+    Only the first (highest-priority) finding goes in the cold email.
+    Save the rest for Day 3 and Day 7 drip follow-ups.
     """
     if not finding_lines:
         template = _FALLBACK_OPENERS.get(niche_key, _FALLBACK_OPENERS["general"])
         return template.format(business_name=business_name)
 
-    # First finding is the main opener
+    # ONE finding only — strongest first, rest saved for drip emails
     opener = f"{business_name}'s website: {finding_lines[0]}."
-
-    # Add 1-2 more findings as supporting evidence
-    extras = finding_lines[1:3]
-    if extras:
-        extra_text = ". ".join(extras)
-        opener += f" Also — {extra_text}."
 
     return opener
 
