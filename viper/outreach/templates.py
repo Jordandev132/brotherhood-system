@@ -189,3 +189,68 @@ NICHE_MAP: dict[str, str] = {
 def resolve_niche_key(niche_query: str) -> str:
     """Map a search query niche to a template key."""
     return NICHE_MAP.get(niche_query.lower(), "general")
+
+
+# ── Forum Reply Templates ──
+# For community leads (Make.com, n8n, Reddit, etc.)
+# Short, casual, demo-first. No pitch, no pricing.
+# Jordan copy-pastes into the forum thread manually.
+
+_FORUM_TEMPLATES: dict[str, str] = {
+    "automation": (
+        "Hey — I build exactly this type of automation. "
+        "Here's a working demo of something similar I put together: {demo_url}\n\n"
+        "DM me if you want to talk details."
+    ),
+    "chatbot": (
+        "Hey — I build custom chatbots like this. "
+        "Here's a live demo you can try right now: {demo_url}\n\n"
+        "DM me if you want to talk details."
+    ),
+    "general": (
+        "Hey — I've built something similar. "
+        "Here's a working demo: {demo_url}\n\n"
+        "DM me if you want to talk details."
+    ),
+}
+
+_FORUM_TYPE_KEYWORDS: dict[str, list[str]] = {
+    "automation": [
+        "automation", "workflow", "n8n", "make.com", "zapier",
+        "integrate", "api", "trigger",
+    ],
+    "chatbot": [
+        "chatbot", "chat bot", "assistant", "widget",
+        "customer support", "faq bot", "ai bot",
+    ],
+}
+
+
+def get_forum_reply(
+    post_context: str = "",
+    demo_url: str = "https://darkcode-ai.github.io/chatbot-demos/belknapdental-com/",
+    reply_type: str = "",
+) -> str:
+    """Generate a short forum reply for community leads.
+
+    Args:
+        post_context: Original forum post text (used for type detection).
+        demo_url: Demo link to include.
+        reply_type: Force a type ("automation", "chatbot", "general").
+                    If empty, auto-detects from post_context.
+
+    Returns:
+        Ready-to-paste forum reply string.
+    """
+    if not reply_type and post_context:
+        post_lower = post_context.lower()
+        for rtype, keywords in _FORUM_TYPE_KEYWORDS.items():
+            if any(kw in post_lower for kw in keywords):
+                reply_type = rtype
+                break
+
+    if not reply_type:
+        reply_type = "general"
+
+    template = _FORUM_TEMPLATES.get(reply_type, _FORUM_TEMPLATES["general"])
+    return template.format(demo_url=demo_url)
