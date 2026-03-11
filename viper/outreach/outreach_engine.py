@@ -27,6 +27,8 @@ from viper.outreach.sendgrid_mailer import send_email
 from viper.outreach.templates import get_outreach_message, resolve_niche_key
 from viper.outreach.outreach_log import already_contacted, log_outreach
 from viper.outreach.approval_queue import queue_lead
+from viper.prospecting.site_auditor import format_findings_for_email
+from viper.outreach.email_sequences import create_sequence
 
 log = logging.getLogger(__name__)
 
@@ -242,6 +244,14 @@ def send_approved_email(lead: dict) -> dict:
         prospect_data=lead.get("prospect_data", {}),
     )
 
+    # Create follow-up sequence after successful send
+    if result.get("status_code") in (200, 202):
+        try:
+            seq_id = create_sequence(lead)
+            log.info("Follow-up sequence %s created for %s", seq_id, lead["business_name"])
+        except Exception as e:
+            log.error("Failed to create follow-up sequence: %s", e)
+
     return result
 
 
@@ -298,12 +308,18 @@ def run_outreach(
             stats["skipped"] += 1
             continue
 
+        # Format audit findings for email (if available)
+        findings_text = ""
+        if hasattr(p, "audit_findings") and p.audit_findings:
+            findings_text = format_findings_for_email(p.audit_findings)
+
         # Build message
         msg = get_outreach_message(
             niche=niche_key,
             business_name=p.business_name,
             demo_url=demo_url,
             contact_name=p.contact_name,
+            findings=findings_text,
         )
 
         # Greeting sanity check before queuing

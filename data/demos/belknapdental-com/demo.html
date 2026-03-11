@@ -536,10 +536,11 @@ body {
       }
 
       // Word overlap with question
-      var qWords = qa.q.toLowerCase().split(/\s+/);
+      var qWords = qa.q.toLowerCase().replace(/[?!.,]/g, "").split(/\s+/);
       for (var w = 0; w < inputWords.length; w++) {
-        if (inputWords[w].length <= 3) continue;
+        if (inputWords[w].length <= 4) continue;
         for (var qw = 0; qw < qWords.length; qw++) {
+          if (qWords[qw].length <= 4) continue;
           if (qWords[qw].indexOf(inputWords[w]) !== -1 || inputWords[w].indexOf(qWords[qw]) !== -1) {
             score += 8;
           }

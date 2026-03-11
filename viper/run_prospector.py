@@ -18,8 +18,10 @@ from viper.prospecting.prospect_writer import (
     write_prospects,
     print_summary,
 )
+from viper.prospecting.site_auditor import audit_site, format_findings_for_email
 from viper.demos.scraper import scrape_business, ScrapedBusiness
 from viper.sources.hunter import find_emails, extract_domain
+from viper.outreach.email_sequences import get_due_followups, generate_followup_draft
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +31,24 @@ logging.basicConfig(
 log = logging.getLogger("prospector")
 
 _SITE_DELAY = 1.5  # seconds between website scrapes
+
+
+def _check_follow_up_sequences() -> int:
+    """Check for due follow-up emails and print drafts for review."""
+    due = get_due_followups()
+    if not due:
+        print("No follow-up emails due right now.")
+        return 0
+
+    print(f"\n{len(due)} follow-up(s) due:\n")
+    for step_info in due:
+        draft = generate_followup_draft(step_info)
+        print(f"  [{step_info['step_id']}] Step {step_info['step']} ({step_info['type']}) "
+              f"→ {step_info['business_name']} ({step_info['email']})")
+        print(f"  Subject: {draft['subject']}")
+        print(f"  Body preview: {draft['body'][:100]}...")
+        print()
+    return 0
 
 
 def main() -> int:
@@ -53,7 +73,15 @@ def main() -> int:
         "--demo-slug", default="",
         help="Demo URL slug (e.g., 'belknapdental-com'). Auto-generated if not set.",
     )
+    parser.add_argument(
+        "--check-sequences", action="store_true",
+        help="Check for due follow-up emails and generate drafts for Jordan's approval",
+    )
     args = parser.parse_args()
+
+    # Sequence check mode — standalone, doesn't run the full pipeline
+    if args.check_sequences:
+        return _check_follow_up_sequences()
 
     headless = args.headless.lower() != "false"
     has_outreach = args.auto_outreach or args.outreach_dry_run
@@ -137,6 +165,10 @@ def main() -> int:
 
     # Sort by score descending
     prospects.sort(key=lambda p: p.score, reverse=True)
+
+    # Step 3.5 — Site audit (attach findings to each prospect)
+    for p in prospects:
+        p.audit_findings = audit_site(p)
 
     # Step 4 — Write output
     out_path = write_prospects(prospects, args.niche, args.city)

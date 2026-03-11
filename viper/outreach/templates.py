@@ -7,19 +7,34 @@ def get_outreach_message(
     business_name: str,
     demo_url: str,
     contact_name: str = "",
+    findings: str = "",
 ) -> dict[str, str]:
     """Return personalized subject + body for a niche.
+
+    Args:
+        findings: Pre-formatted audit findings string (bulleted list).
+                  Injected into the email body via {findings} placeholder.
 
     Returns dict with 'subject' and 'body' keys (plain text).
     """
     greeting = f"Hi {contact_name}" if contact_name else "Hi there"
     template = _TEMPLATES.get(niche.lower(), _TEMPLATES["general"])
+
+    # Build findings block — only if we have actual findings
+    findings_block = ""
+    if findings:
+        findings_block = (
+            f"I was looking at {business_name}'s website and noticed a "
+            f"couple things:\n\n{findings}\n\n"
+        )
+
     return {
         "subject": template["subject"].format(business_name=business_name),
         "body": template["body"].format(
             greeting=greeting,
             business_name=business_name,
             demo_url=demo_url,
+            findings=findings_block,
         ),
     }
 
@@ -29,8 +44,8 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "subject": "Quick question for {business_name}",
         "body": (
             "{greeting},\n\n"
-            "I noticed {business_name} doesn't have a chat assistant on the website. "
-            "I built one that handles the questions your front desk gets "
+            "{findings}"
+            "I built a chat assistant that handles the questions your front desk gets "
             "most — insurance, appointment booking, hours, doctor availability.\n\n"
             "Here's a working demo I put together for a practice like yours:\n"
             "{demo_url}\n\n"
@@ -46,6 +61,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "subject": "Quick idea for {business_name}",
         "body": (
             "{greeting},\n\n"
+            "{findings}"
             "Buyers browsing your listings at 11 PM have questions but no one "
             "to ask. I built a chat assistant that handles property details, "
             "showing requests, and neighborhood questions — and captures "
@@ -61,6 +77,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "subject": "Quick idea for {business_name}",
         "body": (
             "{greeting},\n\n"
+            "{findings}"
             "Most new patients want to book when the pain hits — not during "
             "office hours. I built a chat assistant that answers insurance "
             "questions, explains treatments, and books appointments around "
@@ -76,6 +93,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "subject": "Quick idea for {business_name}",
         "body": (
             "{greeting},\n\n"
+            "{findings}"
             "Car owners Google their problem, find your shop, and then "
             "have to call during business hours. Most don't. I built a "
             "chat assistant that answers service questions, gives estimate "
@@ -91,8 +109,8 @@ _TEMPLATES: dict[str, dict[str, str]] = {
         "subject": "Quick question for {business_name}",
         "body": (
             "{greeting},\n\n"
-            "I noticed {business_name} doesn't have a chat assistant on the "
-            "website. I built one that handles common questions, books "
+            "{findings}"
+            "I built a chat assistant that handles common questions, books "
             "appointments, and captures visitor info after hours.\n\n"
             "Here's a working demo:\n"
             "{demo_url}\n\n"
