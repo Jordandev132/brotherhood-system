@@ -1,12 +1,16 @@
-"""Viper Job Hunter — scans HN, Google Alerts, Reddit, RemoteOK, WWR for freelance gigs.
+"""Viper Job Hunter — scans all inbound sources for freelance gigs.
 
 Runs on a 30-min loop, classifies and scores jobs, deduplicates,
 and sends top matches to Jordan on Telegram with bid suggestions.
 
 Sources:
   - Hacker News "Who's Hiring" + "Freelancer?" threads (Algolia API, free)
-  - Google Alerts RSS (8 configured feeds)
+  - Google Alerts RSS (8+ configured feeds)
   - Reddit (r/forhire, r/freelance, etc.) — requires PRAW creds
+  - Indie Hackers (Firebase API)
+  - Product Hunt RSS
+  - n8n Community Jobs (Discourse RSS)
+  - Make.com Hire a Pro (Discourse RSS)
   - RemoteOK JSON API
   - We Work Remotely RSS
 """
@@ -29,6 +33,24 @@ from viper.sources.google_alerts import scan_google_alerts
 from viper.sources.reddit import scan_reddit
 from viper.telegram_alerts import send_job_alert, send_summary
 from viper.lead_writer import write_leads
+
+# Optional sources — only on Pro (graceful skip on Air)
+try:
+    from viper.sources.indiehackers import scan_indiehackers
+except ImportError:
+    scan_indiehackers = None  # type: ignore[assignment]
+try:
+    from viper.sources.producthunt import scan_producthunt
+except ImportError:
+    scan_producthunt = None  # type: ignore[assignment]
+try:
+    from viper.sources.n8n_community import scan_n8n_community
+except ImportError:
+    scan_n8n_community = None  # type: ignore[assignment]
+try:
+    from viper.sources.make_community import scan_make_community
+except ImportError:
+    scan_make_community = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
@@ -317,6 +339,145 @@ def run_scan() -> dict:
             })
     except Exception as e:
         log.error("[JOB_HUNTER] Reddit scan failed: %s", str(e)[:200])
+
+    # --- Indie Hackers (optional — Pro only) ---
+    if scan_indiehackers is not None:
+        try:
+            ih_jobs = scan_indiehackers()
+            source_counts["IndieHackers"] = len(ih_jobs)
+            for ij in ih_jobs:
+                total_scanned += 1
+                h = _job_hash("indiehackers", ij.job_id)
+                if h in seen:
+                    continue
+                score = _score_job(
+                    category=ij.category,
+                    matched_skills=ij.matched_skills,
+                )
+                all_jobs.append({
+                    "source": "IndieHackers",
+                    "title": ij.title,
+                    "description": ij.description,
+                    "url": ij.url,
+                    "category": ij.category,
+                    "skills": ij.matched_skills,
+                    "budget": "",
+                    "budget_usd_min": 0,
+                    "budget_usd_max": 0,
+                    "bid_count": None,
+                    "score": score,
+                    "hash": h,
+                    "suggested_bid": "Apply",
+                    "suggested_delivery_days": 0,
+                    "client_country": "",
+                })
+        except Exception as e:
+            log.error("[JOB_HUNTER] Indie Hackers scan failed: %s", str(e)[:200])
+
+    # --- Product Hunt (optional — Pro only) ---
+    if scan_producthunt is not None:
+        try:
+            ph_jobs = scan_producthunt()
+            source_counts["ProductHunt"] = len(ph_jobs)
+            for pj in ph_jobs:
+                total_scanned += 1
+                h = _job_hash("producthunt", pj.job_id)
+                if h in seen:
+                    continue
+                score = _score_job(
+                    category=pj.category,
+                    matched_skills=pj.matched_skills,
+                )
+                all_jobs.append({
+                    "source": "ProductHunt",
+                    "title": pj.title,
+                    "description": pj.description,
+                    "url": pj.url,
+                    "category": pj.category,
+                    "skills": pj.matched_skills,
+                    "budget": "",
+                    "budget_usd_min": 0,
+                    "budget_usd_max": 0,
+                    "bid_count": None,
+                    "score": score,
+                    "hash": h,
+                    "suggested_bid": "Apply",
+                    "suggested_delivery_days": 0,
+                    "client_country": "",
+                })
+        except Exception as e:
+            log.error("[JOB_HUNTER] Product Hunt scan failed: %s", str(e)[:200])
+
+    # --- n8n Community Jobs (optional — Pro only) ---
+    if scan_n8n_community is not None:
+        try:
+            n8n_jobs = scan_n8n_community()
+            source_counts["n8n"] = len(n8n_jobs)
+            for nj in n8n_jobs:
+                total_scanned += 1
+                h = _job_hash("n8n", nj.job_id)
+                if h in seen:
+                    continue
+                score = _score_job(
+                    category=nj.category,
+                    matched_skills=nj.matched_skills,
+                )
+                # n8n community = high-intent automation leads
+                score = min(score + 5, 100)
+                all_jobs.append({
+                    "source": "n8n_community",
+                    "title": nj.title,
+                    "description": nj.description,
+                    "url": nj.url,
+                    "category": nj.category,
+                    "skills": nj.matched_skills,
+                    "budget": "",
+                    "budget_usd_min": 0,
+                    "budget_usd_max": 0,
+                    "bid_count": None,
+                    "score": score,
+                    "hash": h,
+                    "suggested_bid": "Apply",
+                    "suggested_delivery_days": 0,
+                    "client_country": "",
+                })
+        except Exception as e:
+            log.error("[JOB_HUNTER] n8n scan failed: %s", str(e)[:200])
+
+    # --- Make.com Hire a Pro (optional — Pro only) ---
+    if scan_make_community is not None:
+        try:
+            make_jobs = scan_make_community()
+            source_counts["Make"] = len(make_jobs)
+            for mj in make_jobs:
+                total_scanned += 1
+                h = _job_hash("make", mj.job_id)
+                if h in seen:
+                    continue
+                score = _score_job(
+                    category=mj.category,
+                    matched_skills=mj.matched_skills,
+                )
+                score = min(score + 5, 100)
+                all_jobs.append({
+                    "source": "Make_community",
+                    "title": mj.title,
+                    "description": mj.description,
+                    "url": mj.url,
+                    "category": mj.category,
+                    "skills": mj.matched_skills,
+                    "budget": "",
+                    "budget_usd_min": 0,
+                    "budget_usd_max": 0,
+                    "bid_count": None,
+                    "score": score,
+                    "hash": h,
+                    "suggested_bid": "Apply",
+                    "suggested_delivery_days": 0,
+                    "client_country": "",
+                })
+        except Exception as e:
+            log.error("[JOB_HUNTER] Make.com scan failed: %s", str(e)[:200])
 
     # --- RemoteOK ---
     try:
