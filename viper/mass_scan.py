@@ -24,7 +24,7 @@ from viper.prospecting.maps_scraper import discover_businesses, deduplicate_list
 from viper.prospecting.chatbot_detector import detect_chatbot, ChatbotDetectionResult
 from viper.prospecting.local_scorer import score_prospect
 from viper.prospecting.prospect_writer import build_prospect, LocalProspect
-from viper.prospecting.site_auditor import audit_site, format_findings_for_email
+from viper.prospecting.site_auditor import audit_site, crawl_and_audit, format_findings_for_email
 from viper.demos.scraper import scrape_business, ScrapedBusiness
 from viper.outreach.outreach_engine import run_outreach
 from viper.tg_router import send as tg_send
@@ -163,9 +163,15 @@ def scan_city_niche(niche: str, city: str) -> dict:
     # Sort by score descending
     prospects.sort(key=lambda p: p.score, reverse=True)
 
-    # Site audit
+    # Site audit — full crawl via Cloudflare if available, else local fallback
     for p in prospects:
-        p.audit_findings = audit_site(p)
+        crawl, findings = crawl_and_audit(p)
+        p.audit_findings = findings
+        if crawl and not crawl.error:
+            # Override chatbot detection with crawl data (more thorough)
+            if crawl.has_chatbot and p.chatbot_confidence != "DETECTED":
+                p.chatbot_confidence = "DETECTED"
+                p.chatbot_name = crawl.chatbot_name
 
     # Count stats
     result["no_chatbot"] = sum(

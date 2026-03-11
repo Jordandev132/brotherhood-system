@@ -5,37 +5,68 @@ Uses tg_router for channel routing (INBOUND channel for Pipeline 2 leads).
 from __future__ import annotations
 
 import logging
+import re
 
 from viper.tg_router import send as tg_send
 
 log = logging.getLogger(__name__)
 
-# Source emoji map
-_SOURCE_EMOJI = {
-    "HackerNews": "Y",
-    "GoogleAlerts": "G",
-    "Reddit": "R",
-    "IndieHackers": "IH",
-    "ProductHunt": "PH",
-    "n8n_community": "n8n",
-    "Make_community": "Make",
-    "RemoteOK": "ROK",
-    "WeWorkRemotely": "WWR",
+# Source display names
+_SOURCE_NAME = {
+    "HackerNews": "HN",
+    "GoogleAlerts": "Google Alerts",
+    "Reddit": "Reddit",
+    "IndieHackers": "Indie Hackers",
+    "ProductHunt": "Product Hunt",
+    "n8n_community": "n8n Community",
+    "Make_community": "Make Community",
+    "RemoteOK": "RemoteOK",
+    "WeWorkRemotely": "WeWorkRemotely",
+}
+
+# Skills we can definitely do
+_CAN_DO_SKILLS = {
+    "chatbot", "bot", "automation", "scraper", "scraping", "api",
+    "telegram", "discord", "whatsapp", "python", "ai", "llm", "gpt",
+    "n8n", "zapier", "flask", "django", "selenium", "backend",
+    "data pipeline", "booking", "appointment", "lead capture",
+    "virtual assistant", "ai agent", "web scraping",
 }
 
 
-def _score_bar(score: int) -> str:
-    """Build a visual score bar like ████████░░ 85/100."""
-    filled = score // 10
-    empty = 10 - filled
-    return "\u2588" * filled + "\u2591" * empty + f" {score}/100"
-
-
-def _skill_tags(skills: list[str]) -> str:
-    """Build hashtag string from skills like #chatbot #automation #ai."""
+def _assess_fit(skills: list[str], category: str) -> str:
+    """Return YES / MAYBE / NO based on skill match."""
     if not skills:
-        return ""
-    return " ".join(f"#{s.replace(' ', '_')}" for s in skills[:5])
+        return "MAYBE"
+    skill_set = {s.lower() for s in skills}
+    overlap = skill_set & _CAN_DO_SKILLS
+    if len(overlap) >= 2:
+        return "YES"
+    if len(overlap) >= 1 or category == "coding":
+        return "MAYBE"
+    return "NO"
+
+
+def _summarize_need(title: str, description: str) -> str:
+    """Extract 1-2 sentence summary of what they need."""
+    desc = re.sub(r"<[^>]+>", "", description).strip()
+    if not desc:
+        return title[:120]
+    # Take first 1-2 sentences
+    sentences = re.split(r"[.!?]\s+", desc)
+    summary = ". ".join(sentences[:2])
+    if len(summary) > 150:
+        summary = summary[:147] + "..."
+    return summary
+
+
+def _extract_name(title: str, source: str) -> str:
+    """Extract company/person name from title."""
+    # HN posts often start with "Company Name |" or "Company Name -"
+    for sep in [" | ", " - ", " — ", " – "]:
+        if sep in title:
+            return title.split(sep)[0].strip()[:60]
+    return title[:60]
 
 
 def send_job_alert(
@@ -53,34 +84,32 @@ def send_job_alert(
     client_country: str = "",
     job_hash: str = "",
 ) -> bool:
-    """Send a clean, compact job lead alert to Jordan's TG with BID/SKIP."""
-    source_tag = _SOURCE_EMOJI.get(source, source)
-    score_bar = _score_bar(score)
-    tags = _skill_tags(skills)
+    """Send a job lead alert to Jordan's TG — clean, actionable format."""
+    source_display = _SOURCE_NAME.get(source, source).lower()
+    name = _extract_name(title, source)
+    need_summary = _summarize_need(title, description)
+    budget_display = budget if budget else "Not stated"
+    fit = _assess_fit(skills, category)
 
-    # Budget line
-    budget_line = f"Budget: {budget}" if budget else ""
+    # Score on /10 scale (input is /100)
+    score_10 = round(score / 10, 1)
+    if score_10 == int(score_10):
+        score_10 = int(score_10)
 
-    # Description preview (150 chars)
-    desc_clean = description[:150].replace("<", "&lt;").replace(">", "&gt;") if description else ""
-    desc_line = f"{desc_clean}..." if desc_clean else ""
+    # Escape HTML
+    name = name.replace("<", "&lt;").replace(">", "&gt;")
+    need_summary = need_summary.replace("<", "&lt;").replace(">", "&gt;")
 
-    # Build the compact message
-    lines = [
-        f"<b>{source_tag} | {title[:100]}</b>",
-        f"<code>{score_bar}</code>",
-    ]
-    if tags:
-        lines.append(tags)
-    if budget_line:
-        lines.append(budget_line)
-    lines.append("")
-    if desc_line:
-        lines.append(desc_line)
-        lines.append("")
-    lines.append(f'<a href="{url}">Open</a>')
-
-    text = "\n".join(lines)
+    text = (
+        f"\U0001f4b0 <b>INBOUND LEAD</b>\n\n"
+        f"Company/Person: {name}\n"
+        f"Website: {url}\n"
+        f"What they need: {need_summary}\n"
+        f"Budget: {budget_display}\n"
+        f"Score: {score_10}/10\n"
+        f"Source: {source_display}\n"
+        f"Can we do this: <b>{fit}</b>"
+    )
 
     buttons = [
         [
