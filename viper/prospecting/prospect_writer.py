@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,141 @@ from viper.prospecting.local_scorer import ProspectScore
 from viper.demos.scraper import ScrapedBusiness
 
 log = logging.getLogger(__name__)
+
+# ── Contact name extraction from email / business name ──
+
+_GENERIC_EMAIL_PREFIXES = frozenset([
+    "info", "office", "admin", "contact", "support", "frontdesk",
+    "manager", "team", "sales", "hello", "help", "billing",
+    "service", "inquiry", "reception", "mail", "noreply",
+    "noreply", "webmaster", "postmaster", "general", "marketing",
+    "contactus", "realestateinquiry", "press", "pressable",
+    "accessibility", "dtx", "wor", "hr", "jobs", "careers",
+]
+)
+
+# Common first names for prefix-matching concatenated emails (e.g. chrismehr → Chris)
+_COMMON_FIRST_NAMES = frozenset([
+    "adam", "al", "alex", "amy", "andrea", "andrew", "angela", "ann",
+    "anna", "anne", "ashley", "barbara", "ben", "bill", "bob", "brian",
+    "carol", "charles", "chris", "dan", "daniel", "darcy", "david",
+    "dean", "deborah", "diane", "don", "donna", "dorothy", "ed",
+    "elizabeth", "emily", "eric", "gary", "gail", "greg", "helen",
+    "jack", "james", "jane", "jason", "jeff", "jen", "jennifer",
+    "jessica", "jim", "joe", "john", "joseph", "josh", "julie",
+    "karen", "kate", "katherine", "kathleen", "keith", "kelly",
+    "ken", "kevin", "kim", "larry", "laura", "linda", "lisa",
+    "mark", "mary", "matt", "matthew", "meg", "melissa", "michael",
+    "michelle", "mike", "nancy", "nate", "nathan", "nick", "nico",
+    "nicole", "pat", "paul", "peter", "rachel", "ray", "rebecca",
+    "richard", "robert", "ron", "ruth", "ryan", "sage", "sam",
+    "sandra", "sarah", "scott", "sharon", "stephanie", "stephen",
+    "steven", "sue", "susan", "ted", "thomas", "tim", "tom",
+    "tony", "william",
+])
+
+
+def name_from_email(email: str) -> str:
+    """Extract a first name from an email address.
+
+    Patterns handled:
+    - first.last@ → First
+    - FIRST.LAST@ → First
+    - first@ (short) → First
+    - chrismehr@ → Chris (prefix match against common names)
+    - info@, office@ etc. → "" (generic, skip)
+    """
+    if not email or "@" not in email:
+        return ""
+    local = email.split("@")[0].lower().strip()
+
+    # Skip generic prefixes
+    if local in _GENERIC_EMAIL_PREFIXES:
+        return ""
+
+    # first.last@ or first.middle.last@ → use first part
+    if "." in local:
+        parts = [p for p in local.split(".") if p]
+        first = parts[0]
+        # Single letter = initial (j.fermin) — try second part instead
+        if len(first) == 1 and len(parts) >= 2 and len(parts[1]) >= 2:
+            first = parts[1]
+        # "johnj" stuck together — strip trailing single initial
+        if len(first) > 2 and first[-1].isalpha() and first[:-1] in _COMMON_FIRST_NAMES:
+            first = first[:-1]
+        if len(first) >= 2 and first not in _GENERIC_EMAIL_PREFIXES:
+            return first.capitalize()
+
+    # Short local part (2-8 chars) that's all alpha → likely a first name
+    if local.isalpha() and 2 <= len(local) <= 8:
+        if local in _COMMON_FIRST_NAMES:
+            return local.capitalize()
+        # 2-5 char alpha-only that isn't in our list — still likely a name
+        # (e.g. "sage", "blake"). Longer ones might be concatenated (jfermin).
+        if len(local) <= 5:
+            return local.capitalize()
+
+    # Longer concatenated names — try prefix match (chrismehr → Chris)
+    if local.isalpha() and len(local) > 8:
+        for length in range(7, 2, -1):  # Try longest prefix first
+            prefix = local[:length]
+            if prefix in _COMMON_FIRST_NAMES:
+                return prefix.capitalize()
+
+    return ""
+
+
+def name_from_business(business_name: str) -> str:
+    """Extract a first name from a business name that contains a person's name.
+
+    Patterns handled:
+    - "Darcy Bento, South Boston Realtor" → Darcy
+    - "Nicole M. Blanchard at Compass" → Nicole
+    - "John J. Dean Jr. - Engel & Volkers" → John
+    - "Nathan Riel - The Riel Estate Team" → Nathan
+    - "Gail Roberts, Ed Feijo & Team" → Gail
+    - "Chris Doherty" (entire name IS the business) → Chris
+    """
+    if not business_name:
+        return ""
+
+    name = business_name.strip()
+
+    # "Name, Title/Location" — split on comma, check if first part is a person
+    # "Name - Company" — split on dash
+    # "Name at Company" — split on " at "
+    for sep in [",", " - ", " – ", " at ", " | ", " with "]:
+        if sep in name:
+            first_part = name.split(sep)[0].strip()
+            extracted = _extract_person_name(first_part)
+            if extracted:
+                return extracted
+            break  # Only try the first separator found
+
+    # Entire business name might be a person's name (e.g. "Chris Doherty")
+    extracted = _extract_person_name(name)
+    if extracted:
+        return extracted
+
+    return ""
+
+
+def _extract_person_name(text: str) -> str:
+    """Check if text looks like a person's name. Return first name or ""."""
+    # Strip titles/suffixes
+    text = re.sub(r'\b(Jr\.?|Sr\.?|III|II|IV|Esq\.?)\b', '', text).strip()
+
+    # "Firstname M. Lastname" or "Firstname Lastname"
+    m = re.match(
+        r'^([A-Z][a-z]{2,})\s+(?:[A-Z]\.?\s+)?([A-Z][a-z]{2,})\s*$',
+        text,
+    )
+    if m:
+        first = m.group(1).lower()
+        if first in _COMMON_FIRST_NAMES:
+            return m.group(1)
+
+    return ""
 
 _DATA_DIR = Path.home() / "polymarket-bot" / "data" / "prospects"
 _TZ = ZoneInfo("America/New_York")
@@ -47,9 +183,30 @@ class LocalProspect:
 
 
 def _pick_contact_name(listing: MapsListing, scraped: ScrapedBusiness | None) -> str:
-    """Pick contact name from scraped website ONLY. Never from Maps."""
+    """Extract contact first name. Priority: email → business name → website scrape."""
+    # 1. Email address (first.last@, chrismehr@, nico@ etc.)
+    email = scraped.email if scraped else ""
+    name = name_from_email(email)
+    if name:
+        return name
+
+    # 2. Business name ("Darcy Bento, South Boston Realtor" → Darcy)
+    name = name_from_business(listing.business_name)
+    if name:
+        return name
+
+    # 3. Website scrape (Dr. pattern, schema.org, team cards — fallback)
     if scraped and scraped.team_members:
-        return scraped.team_members[0]
+        # Use first name only from scraped team member for the greeting
+        full = scraped.team_members[0]
+        # "Dr. Firstname Lastname" → "Dr. Firstname"
+        if full.startswith("Dr.") or full.startswith("Dr "):
+            parts = full.split()
+            return " ".join(parts[:2]) if len(parts) >= 2 else full
+        # "Firstname Lastname, DDS" → "Firstname"
+        first = full.split()[0].rstrip(",")
+        return first
+
     return ""
 
 
