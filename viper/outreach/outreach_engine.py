@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 import requests
@@ -42,6 +43,56 @@ _VERIFIED_DEMOS: dict[str, str] = {
     "dental": "dental-demo",
     "real_estate": "realestate-demo",
 }
+
+def _make_demo_slug(business_name: str) -> str:
+    """Convert business name to a GitHub Pages demo slug.
+
+    "Belmont Periodontics, P.C." → "belmontperiodontics"
+    "Full Circle Realty" → "full-circle-realty"
+    """
+    s = business_name.lower().strip()
+    # Remove common suffixes
+    for suffix in [", p.c.", " p.c.", ", pllc", " pllc", ", llc", " llc",
+                   ", inc.", " inc.", ", inc", " inc"]:
+        s = s.replace(suffix, "")
+    # Keep only alphanumeric and spaces, then convert spaces to hyphens
+    s = re.sub(r"[^a-z0-9\s]", "", s).strip()
+    s = re.sub(r"\s+", "-", s)
+    return s
+
+
+def _check_custom_demo(slug: str) -> bool:
+    """HEAD request to GitHub Pages to check if a custom demo exists."""
+    url = f"{_DEMO_BASE}{slug}/"
+    try:
+        resp = requests.head(url, timeout=6, allow_redirects=True)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def _resolve_demo_url(business_name: str, niche_key: str) -> tuple[str, bool]:
+    """Pick the best demo URL for this lead.
+
+    Returns (demo_url, is_custom_demo).
+    Checks for a custom demo at /chatbot-demos/[business-slug]/ first
+    (tries both hyphenated and concatenated forms), then falls back
+    to the generic niche demo.
+    """
+    slug = _make_demo_slug(business_name)
+    if slug:
+        # Try hyphenated form first (belmont-periodontics)
+        if _check_custom_demo(slug):
+            return f"{_DEMO_BASE}{slug}/", True
+        # Try concatenated form (belmontperiodontics)
+        concat_slug = slug.replace("-", "")
+        if concat_slug != slug and _check_custom_demo(concat_slug):
+            return f"{_DEMO_BASE}{concat_slug}/", True
+
+    # Fallback to generic niche demo
+    generic_slug = _VERIFIED_DEMOS.get(niche_key, "belknapdental-com")
+    return f"{_DEMO_BASE}{generic_slug}/", False
+
 
 # Telegram Bot API — read from env or Shelby's .env
 _TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -181,11 +232,16 @@ def send_draft_review(lead: dict) -> None:
         decline_lead(lead["id"])
         return
 
+    # Flag generic demo links so Jordan knows
+    demo_warning = ""
+    if not lead.get("demo_is_custom", False):
+        demo_warning = "\n\n\u26a0\ufe0f GENERIC DEMO LINK \u2014 no custom demo built yet"
+
     text = (
         f"<b>GATE 2 — Email Draft</b>\n\n"
         f"To: {lead['email']} ({lead['business_name']})\n"
         f"Subject: {lead['subject']}\n\n"
-        f"{lead['body']}\n\n"
+        f"{lead['body']}{demo_warning}\n\n"
         f"Send this email?"
     )
 
@@ -276,11 +332,12 @@ def run_outreach(
             stats["already_contacted"] += 1
             continue
 
-        # Build demo URL — ONLY use verified, live demos
+        # Build demo URL — check for custom demo first, fallback to generic
         if demo_slug:
             demo_url = f"{_DEMO_BASE}{demo_slug}/"
+            demo_is_custom = True
         else:
-            demo_url = f"{_DEMO_BASE}{_VERIFIED_DEMOS.get(niche_key, 'belknapdental-com')}/"
+            demo_url, demo_is_custom = _resolve_demo_url(p.business_name, niche_key)
 
         # Filter individual doctors at outreach level too
         if p.business_name.startswith("Dr.") or p.business_name.startswith("Dr "):
@@ -335,6 +392,7 @@ def run_outreach(
             contact_name=p.contact_name,
             prospect_data=p.to_dict(),
             initial_status="needs_contact_name" if not has_contact_name else "pending",
+            demo_is_custom=demo_is_custom,
         )
 
         if not lead_id:

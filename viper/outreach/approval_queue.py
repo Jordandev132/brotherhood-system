@@ -51,6 +51,7 @@ def queue_lead(
     contact_name: str = "",
     prospect_data: dict | None = None,
     initial_status: str = "pending",
+    demo_is_custom: bool = False,
 ) -> str:
     """Add a lead to the approval queue. Returns the lead_id.
 
@@ -71,6 +72,7 @@ def queue_lead(
         "subject": subject,
         "body": body,
         "demo_url": demo_url,
+        "demo_is_custom": demo_is_custom,
         "status": initial_status,
         "queued_at": now,
         "decided_at": "",
