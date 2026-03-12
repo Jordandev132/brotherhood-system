@@ -280,6 +280,30 @@ def run_quality_gate(html: str, niche: str = "auto") -> tuple[bool, list[str]]:
     return all_pass, failures
 
 
+# ── Tagline cleanup ───────────────────────────────────────────────
+
+def _clean_tagline(raw: str) -> str:
+    """Reject garbage taglines (phone numbers, addresses, CTA text)."""
+    if not raw:
+        return ""
+    # Too long = probably scraped junk
+    if len(raw) > 80:
+        return ""
+    # Contains phone number
+    if re.search(r'\d{3}[-.\s]?\d{3}[-.\s]?\d{4}', raw):
+        return ""
+    # Contains street address
+    if re.search(r'\d+\s+\w+\s+(st|street|ave|avenue|rd|road|blvd|dr|ln|ct|way|place|pl)\b', raw, re.I):
+        return ""
+    # Contains CTA / scheduling junk
+    if re.search(r'schedule|appointment|book now|call us|contact us|click here', raw, re.I):
+        return ""
+    # Contains zip code
+    if re.search(r'\b\d{5}(-\d{4})?\b', raw):
+        return ""
+    return raw.strip()
+
+
 # ── Data merging ────────────────────────────────────────────────────
 
 def _merge_data(scraped, prospect_data: dict, business_name: str) -> dict:
@@ -313,7 +337,7 @@ def _merge_data(scraped, prospect_data: dict, business_name: str) -> dict:
     services = (s.services if s else []) or []
     insurance = (s.insurance_plans if s else []) or []
     payment_methods = (s.payment_methods if s else []) or []
-    tagline = (
+    tagline = _clean_tagline(
         (s.tagline if s else "")
         or (s.description if s else "")
         or prospect_data.get("tagline", "")
