@@ -124,6 +124,16 @@ _HIRING_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Detect "company launches/announces/unveils AI product" articles — NOT hiring
+_AI_LAUNCH_RE = re.compile(
+    r"\b(?:launch(?:es|ed|ing)?|announc(?:es|ed|ing)?|unveil(?:s|ed|ing)?|"
+    r"introduc(?:es|ed|ing)?|releas(?:es|ed|ing)?|roll(?:s|ed|ing)?\s*out|"
+    r"debut(?:s|ed|ing)?|deploy(?:s|ed|ing)?|integrat(?:es|ed|ing)?)\b"
+    r".*?\b(?:ai|artificial\s+intelligence|chatbot|virtual\s+assistant|"
+    r"machine\s+learning|ml|llm|generative|copilot|platform|tool|solution)\b",
+    re.IGNORECASE,
+)
+
 
 def _is_garbage_lead(job: dict) -> tuple[bool, str]:
     """Return (True, reason) if this lead is garbage and should be filtered.
@@ -159,7 +169,14 @@ def _is_garbage_lead(job: dict) -> tuple[bool, str]:
         if not _HIRING_INTENT_RE.search(f"{title} {description}"):
             return True, "ProductHunt launch, no hiring intent"
 
-    # 5. Google Alerts intent filter — reject unless hiring intent
+    # 5. "Company launching AI" article filter — all sources
+    #    Articles about companies releasing AI products are NOT hiring leads.
+    #    Check title first (strongest signal), then title+description.
+    if _AI_LAUNCH_RE.search(title):
+        if not _HIRING_INTENT_RE.search(f"{title} {description}"):
+            return True, "AI product launch article, not hiring"
+
+    # 6. Google Alerts intent filter — reject unless hiring intent
     #    "chatbot"/"automation" alone is NOT enough — news articles about AI products
     #    contain those words. Require hiring intent OR freelance-specific phrases.
     if source == "GoogleAlerts":
@@ -171,7 +188,7 @@ def _is_garbage_lead(job: dict) -> tuple[bool, str]:
             if not any(kw in text for kw in freelance_kws):
                 return True, "GoogleAlerts: no hiring intent"
 
-    # 6. HN freelancer thread filter — "Seeking freelancer?" = people offering, not hiring
+    # 7. HN freelancer thread filter — "Seeking freelancer?" = people offering, not hiring
     if source == "HackerNews" and job.get("thread_type") == "freelancer":
         if not _HIRING_INTENT_RE.search(f"{title} {description}"):
             # In "Seeking freelancer?" threads, most posts are freelancers advertising

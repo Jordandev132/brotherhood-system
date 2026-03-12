@@ -50,8 +50,12 @@ def queue_lead(
     demo_url: str,
     contact_name: str = "",
     prospect_data: dict | None = None,
+    initial_status: str = "pending",
 ) -> str:
-    """Add a lead to the approval queue. Returns the lead_id."""
+    """Add a lead to the approval queue. Returns the lead_id.
+
+    Statuses: pending, needs_contact_name, lead_approved, approved, declined, expired
+    """
     lead_id = str(uuid.uuid4())[:8]
     now = datetime.now(_TZ).isoformat(timespec="seconds")
 
@@ -67,7 +71,7 @@ def queue_lead(
         "subject": subject,
         "body": body,
         "demo_url": demo_url,
-        "status": "pending",  # pending, approved, declined, expired
+        "status": initial_status,
         "queued_at": now,
         "decided_at": "",
         "prospect_data": prospect_data or {},

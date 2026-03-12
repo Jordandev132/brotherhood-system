@@ -288,6 +288,10 @@ def run_outreach(
             stats["skipped"] += 1
             continue
 
+        # CONTACT NAME GATE — never send "Hi team," emails.
+        # If no contact name was found, hold the lead for manual lookup.
+        has_contact_name = bool(p.contact_name and p.contact_name.strip())
+
         # Format audit findings for email (if available)
         findings_text = ""
         if hasattr(p, "audit_findings") and p.audit_findings:
@@ -312,7 +316,8 @@ def run_outreach(
             continue
 
         if dry_run:
-            print(f"  [DRY RUN] Would queue {p.business_name} ({p.email}) for Jordan approval")
+            label = "(HELD — no contact name)" if not has_contact_name else ""
+            print(f"  [DRY RUN] Would queue {p.business_name} ({p.email}) {label}")
             stats["queued"] += 1
             continue
 
@@ -329,16 +334,30 @@ def run_outreach(
             demo_url=demo_url,
             contact_name=p.contact_name,
             prospect_data=p.to_dict(),
+            initial_status="needs_contact_name" if not has_contact_name else "pending",
         )
 
         if not lead_id:
             stats["skipped"] += 1
             continue
 
-        # Send Gate 1 TG approval request to Jordan (lead info only)
-        _send_approval_request(lead_id, p, niche_key)
-        stats["queued"] += 1
-        print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
+        if not has_contact_name:
+            # HOLD — don't send Gate 1, notify Jordan it needs manual name lookup
+            _send_tg(
+                f"<b>HELD — needs contact name</b>\n\n"
+                f"Business: {p.business_name}\n"
+                f"Website: {getattr(p, 'website', '')}\n"
+                f"Email: {p.email}\n"
+                f"Score: {p.score}/10\n\n"
+                f"Find a real contact name before this can go through Gate 1."
+            )
+            stats["queued"] += 1
+            print(f"  [outreach] HELD {p.business_name} — needs contact name (lead {lead_id})")
+        else:
+            # Send Gate 1 TG approval request to Jordan (lead info only)
+            _send_approval_request(lead_id, p, niche_key)
+            stats["queued"] += 1
+            print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
 
     print(f"\n  [outreach] Done: {stats['queued']} queued, "
           f"{stats['skipped']} skipped (no email/chatbot/bad greeting), "

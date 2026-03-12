@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode, urlunparse
 
 import feedparser
 
@@ -78,20 +78,39 @@ def _get_feed_urls() -> list[str]:
     return list(set(feeds))  # Deduplicate
 
 
+_UTM_PARAMS = frozenset([
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "utm_id", "utm_source_platform", "utm_creative_format",
+])
+
+
+def _normalize_url(url: str) -> str:
+    """Strip UTM tracking params and trailing slashes for stable dedup."""
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query, keep_blank_values=False)
+    clean_qs = {k: v for k, v in qs.items() if k.lower() not in _UTM_PARAMS}
+    clean_query = urlencode(clean_qs, doseq=True) if clean_qs else ""
+    # Strip trailing slash from path (but keep "/" for root)
+    path = parsed.path.rstrip("/") or "/"
+    return urlunparse((parsed.scheme, parsed.netloc, path,
+                       parsed.params, clean_query, ""))
+
+
 def _unwrap_google_url(url: str) -> str:
     """Extract the real destination URL from a Google Alerts redirect.
 
     Google Alerts wraps URLs as:
       https://www.google.com/url?rct=j&sa=t&url=REAL_URL&ct=...&cd=...&usg=...
     The ct/cd/usg params change between fetches, breaking dedup.
+    After unwrapping, strips UTM params and trailing slashes.
     """
     parsed = urlparse(url)
     if parsed.hostname and "google.com" in parsed.hostname and parsed.path == "/url":
         qs = parse_qs(parsed.query)
         inner = qs.get("url", [""])[0]
         if inner:
-            return inner
-    return url
+            return _normalize_url(inner)
+    return _normalize_url(url)
 
 
 def _classify(text: str) -> tuple[str, list[str]]:

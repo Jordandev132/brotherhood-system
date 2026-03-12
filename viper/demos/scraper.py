@@ -370,8 +370,15 @@ def _extract_faq(soup: BeautifulSoup, biz: ScrapedBusiness) -> None:
 
 
 def _extract_team(soup: BeautifulSoup, text: str, biz: ScrapedBusiness) -> None:
-    """Extract team member names from body content only (not nav/header/footer)."""
-    # Words that are NOT part of a person's name — common in dental website text
+    """Extract team member names from body content only (not nav/header/footer).
+
+    Extraction methods (in priority order):
+    1. Schema.org Person/Physician structured data
+    2. "Dr. Firstname Lastname" pattern in body text
+    3. "Meet Dr. X" page titles
+    4. Team card headings with team/staff CSS classes
+    5. Owner/founder patterns ("Owner: Name", "Founded by Name")
+    """
     _NOT_NAMES = {
         "meet", "our", "the", "and", "with", "about", "team", "staff",
         "doctor", "dentist", "office", "welcome", "schedule", "visit",
@@ -385,18 +392,32 @@ def _extract_team(soup: BeautifulSoup, text: str, biz: ScrapedBusiness) -> None:
         "professional", "comprehensive", "emergency", "routine",
     }
 
-    # Use body content only — strip nav, header, footer to avoid
-    # parsing navigation text like "Meet Our Team" as a doctor name
+    # 1. Schema.org Person/Physician structured data (highest quality)
+    import json as _json
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(script.string or "")
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and item.get("@type") in (
+                    "Person", "Physician", "Dentist", "MedicalBusiness",
+                ):
+                    name = item.get("name", "")
+                    if name and name not in biz.team_members and len(name) < 60:
+                        biz.team_members.append(name)
+        except Exception:
+            continue
+
+    # Use body content only — strip nav, header, footer
     body = soup.find("main") or soup.find("article") or soup.find("body")
     if body:
-        # Remove nav/header/footer elements before extracting text
         import copy
         body = copy.copy(body)
         for tag in body.find_all(["nav", "header", "footer"]):
             tag.decompose()
         text = body.get_text(" ", strip=True)
 
-    # Match "Dr. Firstname Lastname" — strict: 3+ chars per name part
+    # 2. "Dr. Firstname Lastname" — strict: 3+ chars per name part
     dr_pattern = re.findall(r'Dr\.?\s+([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})', text)
     for first, last in dr_pattern:
         if first.lower() in _NOT_NAMES or last.lower() in _NOT_NAMES:
@@ -405,14 +426,35 @@ def _extract_team(soup: BeautifulSoup, text: str, biz: ScrapedBusiness) -> None:
         if name not in biz.team_members:
             biz.team_members.append(name)
 
-    # Look for team cards with names in headings
+    # 3. "Meet Dr. X" in page title or h1/h2
+    for heading in soup.find_all(["title", "h1", "h2"], limit=10):
+        htxt = heading.get_text(strip=True)
+        m = re.search(r'Meet\s+(Dr\.?\s+[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?)', htxt)
+        if m:
+            name = m.group(1)
+            if name not in biz.team_members:
+                biz.team_members.append(name)
+
+    # 4. Team cards with names in headings
     for heading in soup.find_all(["h3", "h4"], limit=20):
         name = heading.get_text(strip=True)
         if 5 < len(name) < 40 and not any(c.isdigit() for c in name):
             parent_class = " ".join(heading.parent.get("class", []))
-            if any(kw in parent_class.lower() for kw in ["team", "staff", "doctor", "agent"]):
+            if any(kw in parent_class.lower() for kw in ["team", "staff", "doctor", "agent", "provider", "bio"]):
                 if name not in biz.team_members:
                     biz.team_members.append(name)
+
+    # 5. Owner/founder patterns
+    owner_patterns = [
+        r'(?:Owner|Founder|Principal|Director)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+        r'(?:Owned|Founded|Led)\s+by\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+    ]
+    for pat in owner_patterns:
+        m = re.search(pat, text)
+        if m:
+            name = m.group(1)
+            if name not in biz.team_members and name.split()[0].lower() not in _NOT_NAMES:
+                biz.team_members.append(name)
 
 
 def _extract_insurance(text: str, biz: ScrapedBusiness) -> None:
