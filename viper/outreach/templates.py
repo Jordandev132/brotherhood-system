@@ -20,6 +20,8 @@ NEVER DO:
 """
 from __future__ import annotations
 
+import random
+
 _DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
 
 # Verified demo slugs — these return 200 on GitHub Pages
@@ -157,20 +159,128 @@ _FALLBACK_OPENERS: dict[str, str] = {
 }
 
 
+# Humanized opener phrases keyed by finding type.
+# Each list has 5-6 variants that sound like Jordan personally visited the site.
+# {biz} = business name, {finding} = the raw finding text.
+_OPENER_VARIANTS: dict[str, list[str]] = {
+    "chatbot": [
+        "I was on {biz}'s site last night and noticed there's no way for visitors to get answers after hours.",
+        "Spent a few minutes on {biz}'s website — couldn't find a chatbot or live chat anywhere.",
+        "I pulled up {biz}'s site on my phone and tried asking a question after 5 PM. No way to get an answer.",
+        "Checked out {biz}'s website earlier — no chatbot, no live chat. After-hours visitors are on their own.",
+        "I went through {biz}'s site and noticed there's nothing handling visitor questions when the office is closed.",
+        "Looked at {biz}'s website and there's no chat assistant on any page — visitors with questions after hours have nowhere to go.",
+    ],
+    "meta_description": [
+        "I Googled {biz} and the search preview is just random text pulled from your site — no clear description.",
+        "Searched for {biz} on Google and the snippet under your name looks auto-generated. No meta description set.",
+        "I looked up {biz} on Google — the preview text doesn't say what you actually do. Missing a meta description.",
+        "Pulled up {biz} in Google search results and the description is generic page text, not a real pitch.",
+        "Googled {biz} and the two-line preview doesn't do you justice — there's no meta description telling people what you offer.",
+    ],
+    "viewport": [
+        "I opened {biz}'s site on my phone and it doesn't resize properly — no mobile viewport tag.",
+        "Pulled up {biz}'s website on mobile and the layout is broken. Missing a viewport meta tag.",
+        "Checked {biz}'s site on my phone — it loads the desktop version and you have to pinch-zoom everything.",
+        "I visited {biz}'s website from my iPhone and it's not mobile-friendly. Google penalizes that in rankings.",
+        "Looked at {biz}'s site on mobile — it's not optimized for phones, which is where most patients are searching.",
+    ],
+    "schema": [
+        "I checked {biz}'s site and there's no structured data — your hours, reviews, and address won't show up as rich results on Google.",
+        "Looked at {biz}'s source code and there's no schema markup. You're missing out on those enhanced Google search listings.",
+        "Pulled up {biz} on Google — no rich results showing hours or ratings. The site is missing schema markup.",
+        "Checked {biz}'s website and there's no structured data markup — Google can't display your business info in search results.",
+        "I looked at {biz}'s site and noticed no schema markup. That means no star ratings, hours, or address showing up in Google.",
+    ],
+    "contact_form": [
+        "I tried to reach out through {biz}'s website and couldn't find a contact form anywhere.",
+        "Went through {biz}'s site looking for a way to send a message — the contact form is either missing or buried deep.",
+        "Spent a few minutes on {biz}'s site trying to find a contact form. Gave up after three clicks.",
+        "Checked {biz}'s website and there's no easy way for visitors to reach you without picking up the phone.",
+        "I looked through {biz}'s site and the contact form is missing — visitors who don't want to call have no way to reach out.",
+    ],
+    "alt_text": [
+        "I looked at {biz}'s website and most of the images are missing alt text — that hurts both SEO and accessibility.",
+        "Checked {biz}'s site and a big chunk of images have no descriptions. Google can't index what it can't read.",
+        "Went through {biz}'s website — a lot of images are missing alt tags, which means Google is ignoring them entirely.",
+        "Pulled up {biz}'s site and noticed the images aren't tagged with descriptions. That's free SEO left on the table.",
+        "Looked at {biz}'s website source — most images have no alt text. Screen readers can't describe them either.",
+    ],
+    "faq": [
+        "I found {biz}'s FAQ page and it's got questions that a chatbot could answer instantly, 24/7.",
+        "Checked {biz}'s FAQ — all those questions are exactly what a chat assistant handles automatically.",
+        "Looked at {biz}'s FAQ page and every question there is something an AI assistant could field after hours.",
+        "Went through {biz}'s FAQ and counted the questions — all of them could be automated with a chatbot.",
+        "I saw {biz}'s FAQ section and thought: every single one of these could get an instant answer from a chat assistant.",
+    ],
+    "ssl": [
+        "I visited {biz}'s website and Chrome flagged it as 'Not Secure' — no SSL certificate.",
+        "Pulled up {biz}'s site and the browser shows a security warning. The site isn't running HTTPS.",
+        "Checked {biz}'s website and it's not using SSL — visitors see a 'Not Secure' warning, which kills trust.",
+        "I went to {biz}'s site and noticed it's still on HTTP. Google ranks HTTPS sites higher and browsers warn visitors.",
+        "Looked at {biz}'s website — no SSL certificate. That 'Not Secure' label in the browser scares people off.",
+    ],
+    "h1": [
+        "I looked at {biz}'s homepage and the H1 heading is missing — Google uses that to understand what the page is about.",
+        "Checked {biz}'s site and there's no main heading on the homepage. Search engines need that to rank you properly.",
+        "Pulled up {biz}'s homepage source and the H1 tag is missing. That's one of the first things Google looks at.",
+        "Went through {biz}'s website and noticed the homepage doesn't have a proper H1 heading for SEO.",
+        "Looked at {biz}'s site — no H1 on the homepage. That's a quick SEO fix that helps Google understand your business.",
+    ],
+}
+
+# Catch-all for finding types not in the map above
+_GENERIC_OPENERS = [
+    "I was looking at {biz}'s website and spotted something: {finding}.",
+    "Spent a few minutes on {biz}'s site and noticed {finding}.",
+    "I checked out {biz}'s website and one thing stood out — {finding}.",
+    "Pulled up {biz}'s site earlier and saw that {finding}.",
+    "I went through {biz}'s website and found that {finding}.",
+    "Looked at {biz}'s site and noticed {finding}.",
+]
+
+
+def _classify_finding(finding: str) -> str:
+    """Map a finding string to a variant key."""
+    lower = finding.lower()
+    if "chatbot" in lower or "live chat" in lower or "after-hours" in lower:
+        return "chatbot"
+    if "meta description" in lower:
+        return "meta_description"
+    if "viewport" in lower or "mobile" in lower:
+        return "viewport"
+    if "schema" in lower or "structured data" in lower:
+        return "schema"
+    if "contact form" in lower:
+        return "contact_form"
+    if "alt text" in lower:
+        return "alt_text"
+    if "faq" in lower:
+        return "faq"
+    if "ssl" in lower or "https" in lower or "not secure" in lower:
+        return "ssl"
+    if "h1" in lower:
+        return "h1"
+    return "generic"
+
+
 def _build_opener(finding_lines: list[str], business_name: str, niche_key: str = "general") -> str:
     """Build the email opener from the ONE strongest audit finding.
 
-    Only the first (highest-priority) finding goes in the cold email.
-    Save the rest for Day 3 and Day 7 drip follow-ups.
+    Randomly selects from 5-6 human-phrased variants per finding type.
+    Sounds like Jordan personally visited the site, not a generated report.
     """
     if not finding_lines:
         template = _FALLBACK_OPENERS.get(niche_key, _FALLBACK_OPENERS["general"])
         return template.format(business_name=business_name)
 
-    # ONE finding only — strongest first, rest saved for drip emails
-    opener = f"{business_name}'s website: {finding_lines[0]}."
+    finding = finding_lines[0]
+    ftype = _classify_finding(finding)
 
-    return opener
+    variants = _OPENER_VARIANTS.get(ftype, _GENERIC_OPENERS)
+    template = random.choice(variants)
+
+    return template.format(biz=business_name, finding=finding)
 
 
 # ── Niche-specific cost lines ──
