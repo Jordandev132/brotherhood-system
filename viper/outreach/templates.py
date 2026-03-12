@@ -21,8 +21,66 @@ NEVER DO:
 from __future__ import annotations
 
 import random
+import re
 
 _DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
+
+# ── Contact name formatting ──
+
+_MEDICAL_NICHES = {"dental", "dentist", "chiropractor", "orthodontist", "doctor"}
+
+# Single-letter initials like "B.", "M.", "J."
+_INITIAL_RE = re.compile(r'^[A-Z]\.$')
+
+
+def format_greeting_name(raw_name: str, niche: str = "") -> str:
+    """Format a contact name for email greetings.
+
+    Rules:
+    1. Strip everything after first comma (credentials like CRE, DMD, MBA)
+    2. Remove single-letter initials (B., M., J.)
+    3. Medical niches (dental, chiropractor) → "Dr. [Last Name]"
+    4. All other niches → first name only
+    5. Never include middle initials or designations
+
+    Examples:
+        "B. John Dill, CRE, FRICS"  + real_estate → "John"
+        "Dr. Paulomi Naik, DMD"     + dental      → "Dr. Naik"
+        "Nicole M. Blanchard"       + real_estate  → "Nicole"
+        "Darcy Bento"               + dental       → "Dr. Bento"
+    """
+    if not raw_name or not raw_name.strip():
+        return ""
+
+    # 1. Strip after first comma (credentials)
+    name = raw_name.split(",")[0].strip()
+
+    # 2. Split into parts, track and remove "Dr." prefix
+    parts = name.split()
+    has_dr = False
+    clean = []
+    for p in parts:
+        if p.lower() in ("dr.", "dr"):
+            has_dr = True
+            continue
+        if _INITIAL_RE.match(p):
+            continue
+        clean.append(p)
+
+    if not clean:
+        return ""
+
+    # 3. Determine niche type
+    niche_lower = niche.lower().strip() if niche else ""
+    is_medical = niche_lower in _MEDICAL_NICHES
+
+    # 4. Format based on niche
+    if is_medical:
+        # Dr. [Last Name]
+        return f"Dr. {clean[-1]}"
+    else:
+        # First name only
+        return clean[0]
 
 # Verified demo slugs — these return 200 on GitHub Pages
 _DEMO_SLUGS = {
@@ -46,7 +104,8 @@ def get_outreach_message(
 
     Returns dict with 'subject' and 'body' keys (plain text).
     """
-    greeting = f"Hi {contact_name}" if contact_name else "Hi team"
+    formatted_name = format_greeting_name(contact_name, niche)
+    greeting = f"Hi {formatted_name}" if formatted_name else "Hi team"
     niche_key = resolve_niche_key(niche) if niche not in _NICHE_BODIES else niche
 
     # Parse findings into individual lines

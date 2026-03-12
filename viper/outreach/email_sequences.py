@@ -156,7 +156,10 @@ def generate_followup_draft(step_info: dict) -> dict:
     Returns dict with 'subject' and 'body' keys.
     """
     biz = step_info["business_name"]
-    contact = step_info.get("contact_name", "")
+    from viper.outreach.templates import format_greeting_name
+    raw_contact = step_info.get("contact_name", "")
+    niche = step_info.get("niche", "")
+    contact = format_greeting_name(raw_contact, niche)
     greeting = f"Hi {contact}" if contact else "Hi there"
     original_subject = step_info.get("original_subject", "")
     finding = step_info.get("finding_snippet", "")
