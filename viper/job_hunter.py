@@ -35,10 +35,12 @@ from viper.telegram_alerts import send_job_alert, send_summary
 from viper.lead_writer import write_leads
 
 # Optional sources — only on Pro (graceful skip on Air)
-try:
-    from viper.sources.indiehackers import scan_indiehackers
-except ImportError:
-    scan_indiehackers = None  # type: ignore[assignment]
+# Indie Hackers DISABLED (Mar 12 2026) — zero valid leads, all builder posts.
+# Re-enable after buyer-vs-builder intent filter is built.
+# try:
+#     from viper.sources.indiehackers import scan_indiehackers
+# except ImportError:
+#     scan_indiehackers = None
 try:
     from viper.sources.producthunt import scan_producthunt
 except ImportError:
@@ -481,39 +483,10 @@ def run_scan() -> dict:
     except Exception as e:
         log.error("[JOB_HUNTER] Reddit scan failed: %s", str(e)[:200])
 
-    # --- Indie Hackers (optional — Pro only) ---
-    if scan_indiehackers is not None:
-        try:
-            ih_jobs = scan_indiehackers()
-            source_counts["IndieHackers"] = len(ih_jobs)
-            for ij in ih_jobs:
-                total_scanned += 1
-                h = _job_hash("indiehackers", ij.job_id)
-                if h in seen:
-                    continue
-                score = _score_job(
-                    category=ij.category,
-                    matched_skills=ij.matched_skills,
-                )
-                all_jobs.append({
-                    "source": "IndieHackers",
-                    "title": ij.title,
-                    "description": ij.description,
-                    "url": ij.url,
-                    "category": ij.category,
-                    "skills": ij.matched_skills,
-                    "budget": "",
-                    "budget_usd_min": 0,
-                    "budget_usd_max": 0,
-                    "bid_count": None,
-                    "score": score,
-                    "hash": h,
-                    "suggested_bid": "Apply",
-                    "suggested_delivery_days": 0,
-                    "client_country": "",
-                })
-        except Exception as e:
-            log.error("[JOB_HUNTER] Indie Hackers scan failed: %s", str(e)[:200])
+    # --- Indie Hackers — DISABLED (Mar 12 2026) ---
+    # Zero valid leads, all builder/showcase posts. Re-enable only after
+    # a buyer-vs-builder intent filter is built.
+    # See: _BUILDER_RE in _is_garbage_lead() for the filter pattern.
 
     # --- Product Hunt (optional — Pro only) ---
     if scan_producthunt is not None:
