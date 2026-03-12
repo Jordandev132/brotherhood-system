@@ -37,61 +37,10 @@ log = logging.getLogger(__name__)
 # Demo URL base — GitHub Pages
 _DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
 
-# ONLY demos that are live and verified on GitHub Pages.
-# NEVER auto-generate slugs. If a niche isn't here, use belknapdental-com.
-_VERIFIED_DEMOS: dict[str, str] = {
-    "dental": "dental-demo",
-    "real_estate": "realestate-demo",
-}
-
-def _make_demo_slug(business_name: str) -> str:
-    """Convert business name to a GitHub Pages demo slug.
-
-    "Belmont Periodontics, P.C." → "belmontperiodontics"
-    "Full Circle Realty" → "full-circle-realty"
-    """
-    s = business_name.lower().strip()
-    # Remove common suffixes
-    for suffix in [", p.c.", " p.c.", ", pllc", " pllc", ", llc", " llc",
-                   ", inc.", " inc.", ", inc", " inc"]:
-        s = s.replace(suffix, "")
-    # Keep only alphanumeric and spaces, then convert spaces to hyphens
-    s = re.sub(r"[^a-z0-9\s]", "", s).strip()
-    s = re.sub(r"\s+", "-", s)
-    return s
-
-
-def _check_custom_demo(slug: str) -> bool:
-    """HEAD request to GitHub Pages to check if a custom demo exists."""
-    url = f"{_DEMO_BASE}{slug}/"
-    try:
-        resp = requests.head(url, timeout=6, allow_redirects=True)
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-
-def _resolve_demo_url(business_name: str, niche_key: str) -> tuple[str, bool]:
-    """Pick the best demo URL for this lead.
-
-    Returns (demo_url, is_custom_demo).
-    Checks for a custom demo at /chatbot-demos/[business-slug]/ first
-    (tries both hyphenated and concatenated forms), then falls back
-    to the generic niche demo.
-    """
-    slug = _make_demo_slug(business_name)
-    if slug:
-        # Try hyphenated form first (belmont-periodontics)
-        if _check_custom_demo(slug):
-            return f"{_DEMO_BASE}{slug}/", True
-        # Try concatenated form (belmontperiodontics)
-        concat_slug = slug.replace("-", "")
-        if concat_slug != slug and _check_custom_demo(concat_slug):
-            return f"{_DEMO_BASE}{concat_slug}/", True
-
-    # Fallback to generic niche demo
-    generic_slug = _VERIFIED_DEMOS.get(niche_key, "belknapdental-com")
-    return f"{_DEMO_BASE}{generic_slug}/", False
+# Generic demos permanently retired (Mar 12 2026).
+# Custom demos are auto-built at Gate 1 YES by demo_builder + demo_deployer.
+# This placeholder URL is used at queue time before the custom demo exists.
+_PLACEHOLDER_DEMO = "https://darkcode-ai.github.io/chatbot-demos/dental-demo/"
 
 
 # Telegram Bot API — read from env or Shelby's .env
@@ -232,16 +181,19 @@ def send_draft_review(lead: dict) -> None:
         decline_lead(lead["id"])
         return
 
-    # Flag generic demo links so Jordan knows
-    demo_warning = ""
+    # Verify custom demo exists — Gate 2 should never fire without one
     if not lead.get("demo_is_custom", False):
-        demo_warning = "\n\n\u26a0\ufe0f GENERIC DEMO LINK \u2014 no custom demo built yet"
+        log.warning("Gate 2 blocked for %s — no custom demo", lead.get("business_name"))
+        _send_tg(f"BLOCKED: {lead.get('business_name')} — no custom demo built. "
+                 f"Demo must be built before Gate 2 can proceed.")
+        return
 
     text = (
         f"<b>GATE 2 — Email Draft</b>\n\n"
         f"To: {lead['email']} ({lead['business_name']})\n"
+        f"Demo: {lead.get('demo_url', 'N/A')}\n"
         f"Subject: {lead['subject']}\n\n"
-        f"{lead['body']}{demo_warning}\n\n"
+        f"{lead['body']}\n\n"
         f"Send this email?"
     )
 
@@ -344,12 +296,15 @@ def run_outreach(
             stats["already_contacted"] += 1
             continue
 
-        # Build demo URL — check for custom demo first, fallback to generic
+        # Demo URL: placeholder at queue time. Custom demo is auto-built
+        # at Gate 1 YES (demo_builder + demo_deployer). The email gets
+        # regenerated with the real custom URL before Gate 2.
         if demo_slug:
             demo_url = f"{_DEMO_BASE}{demo_slug}/"
             demo_is_custom = True
         else:
-            demo_url, demo_is_custom = _resolve_demo_url(p.business_name, niche_key)
+            demo_url = _PLACEHOLDER_DEMO
+            demo_is_custom = False
 
         # Filter individual doctors at outreach level too
         if p.business_name.startswith("Dr.") or p.business_name.startswith("Dr "):

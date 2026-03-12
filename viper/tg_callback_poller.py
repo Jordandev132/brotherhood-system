@@ -130,7 +130,7 @@ def _handle_skip(bot_token, cb_id, chat_id, message_id, original_text, lead_hash
 
 
 def _handle_outreach_yes(bot_token, cb_id, chat_id, message_id, original_text, lead_id):
-    """Gate 1: Approve outreach lead."""
+    """Gate 1: Approve outreach lead → build custom demo → Gate 2."""
     try:
         from viper.outreach.approval_queue import approve_lead_gate
         lead = approve_lead_gate(lead_id)
@@ -138,16 +138,105 @@ def _handle_outreach_yes(bot_token, cb_id, chat_id, message_id, original_text, l
             _answer_callback(bot_token, cb_id, "Lead not found")
             _edit_message(bot_token, chat_id, message_id, original_text + "\n\nLead not found or already decided.")
             return
-        _answer_callback(bot_token, cb_id, "Approved — building draft...")
-        _edit_message(bot_token, chat_id, message_id, original_text + f"\n\nAPPROVED: {lead.get('business_name', lead_id)}")
+        _answer_callback(bot_token, cb_id, "Approved — building custom demo...")
+        _edit_message(bot_token, chat_id, message_id,
+                      original_text + f"\n\nAPPROVED: {lead.get('business_name', lead_id)}"
+                      f"\nBuilding custom demo — Gate 2 coming shortly...")
 
-        # Send Gate 2 draft
-        from viper.outreach.outreach_engine import send_draft_review
-        send_draft_review(lead)
-        log.info("Gate 1 YES for %s", lead_id)
+        # Build demo + deploy + Gate 2 in background thread (takes ~60-90s)
+        t = threading.Thread(
+            target=_build_demo_and_review,
+            args=(bot_token, lead),
+            daemon=True,
+        )
+        t.start()
+        log.info("Gate 1 YES for %s — demo build started", lead_id)
     except Exception as e:
         log.error("Gate 1 YES failed for %s: %s", lead_id, e)
         _answer_callback(bot_token, cb_id, f"Error: {e}")
+
+
+def _build_demo_and_review(bot_token: str, lead: dict) -> None:
+    """Background: build custom demo → deploy → regenerate email → Gate 2.
+
+    This runs in a separate thread so the callback poller isn't blocked.
+    Takes ~60-90 seconds (scrape + build + git push + GitHub Pages deploy).
+    """
+    biz = lead.get("business_name", "Unknown")
+    niche = lead.get("niche", "dental")
+    website = lead.get("prospect_data", {}).get("website", "")
+    lead_id = lead.get("id", "")
+
+    try:
+        # 1. Build the custom demo HTML
+        from viper.outreach.demo_builder import build_demo_html
+        log.info("[DEMO_FLOW] Building demo for %s (niche=%s, site=%s)", biz, niche, website)
+        html = build_demo_html(
+            business_name=biz,
+            niche=niche,
+            website=website,
+            prospect_data=lead.get("prospect_data", {}),
+        )
+
+        # 2. Deploy to GitHub Pages
+        from viper.outreach.demo_deployer import deploy_demo
+        demo_url, deployed = deploy_demo(biz, html, niche)
+
+        if not deployed or not demo_url:
+            log.error("[DEMO_FLOW] Deploy failed for %s", biz)
+            from viper.outreach.outreach_engine import _send_tg
+            _send_tg(f"DEMO BUILD FAILED for {biz} — could not deploy to GitHub Pages. "
+                     f"Lead {lead_id} is stuck at lead_approved. Fix and retry.")
+            return
+
+        # 3. Update lead with custom demo URL
+        lead["demo_url"] = demo_url
+        lead["demo_is_custom"] = True
+
+        # 4. Regenerate email with custom demo URL
+        from viper.outreach.templates import get_outreach_message, resolve_niche_key
+        from viper.prospecting.site_auditor import format_findings_for_email
+
+        niche_key = resolve_niche_key(niche)
+        findings_text = ""
+        pitch_angle = lead.get("prospect_data", {}).get("pitch_angle", "")
+        if pitch_angle:
+            findings_text = pitch_angle
+
+        msg = get_outreach_message(
+            niche=niche_key,
+            business_name=biz,
+            demo_url=demo_url,
+            contact_name=lead.get("contact_name", ""),
+            findings=findings_text,
+        )
+        lead["subject"] = msg["subject"]
+        lead["body"] = msg["body"]
+
+        # 5. Save updated lead back to queue
+        from viper.outreach.approval_queue import _load_queue, _save_queue
+        queue = _load_queue()
+        for entry in queue:
+            if entry["id"] == lead_id:
+                entry["demo_url"] = demo_url
+                entry["demo_is_custom"] = True
+                entry["subject"] = msg["subject"]
+                entry["body"] = msg["body"]
+                break
+        _save_queue(queue)
+
+        # 6. Send Gate 2 draft review
+        from viper.outreach.outreach_engine import send_draft_review
+        send_draft_review(lead)
+        log.info("[DEMO_FLOW] Demo deployed + Gate 2 sent for %s → %s", biz, demo_url)
+
+    except Exception as e:
+        log.error("[DEMO_FLOW] Failed for %s: %s", biz, e, exc_info=True)
+        try:
+            from viper.outreach.outreach_engine import _send_tg
+            _send_tg(f"DEMO BUILD ERROR for {biz}: {e}\nLead {lead_id} needs manual attention.")
+        except Exception:
+            pass
 
 
 def _handle_outreach_no(bot_token, cb_id, chat_id, message_id, original_text, lead_id):
