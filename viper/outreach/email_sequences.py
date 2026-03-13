@@ -25,6 +25,14 @@ ET = timezone(timedelta(hours=-5))
 
 _SEQUENCES_FILE = Path.home() / "polymarket-bot" / "data" / "outreach_sequences.json"
 
+# CAN-SPAM compliance footer — appended to every follow-up email
+_CAN_SPAM_FOOTER = (
+    "\n\n---\n"
+    "DarkCode AI | PO Box address pending\n"
+    "If you'd rather not hear from me, just reply \"unsubscribe\" and "
+    "I'll remove you immediately."
+)
+
 
 def _load_sequences() -> list[dict]:
     if _SEQUENCES_FILE.exists():
@@ -68,9 +76,9 @@ def create_sequence(lead_data: dict) -> str:
         {
             "step": 2,
             "step_id": f"{seq_id}-s2",
-            "delay_days": 7,
-            "send_at": (now + timedelta(days=7)).isoformat(),
-            "type": "value_add",
+            "delay_days": 5,
+            "send_at": (now + timedelta(days=5)).isoformat(),
+            "type": "stat_hook",
             "status": "pending",
             "draft": None,
             "sent_at": None,
@@ -78,8 +86,28 @@ def create_sequence(lead_data: dict) -> str:
         {
             "step": 3,
             "step_id": f"{seq_id}-s3",
-            "delay_days": 14,
-            "send_at": (now + timedelta(days=14)).isoformat(),
+            "delay_days": 8,
+            "send_at": (now + timedelta(days=8)).isoformat(),
+            "type": "value_add",
+            "status": "pending",
+            "draft": None,
+            "sent_at": None,
+        },
+        {
+            "step": 4,
+            "step_id": f"{seq_id}-s4",
+            "delay_days": 12,
+            "send_at": (now + timedelta(days=12)).isoformat(),
+            "type": "new_angle",
+            "status": "pending",
+            "draft": None,
+            "sent_at": None,
+        },
+        {
+            "step": 5,
+            "step_id": f"{seq_id}-s5",
+            "delay_days": 17,
+            "send_at": (now + timedelta(days=17)).isoformat(),
             "type": "closing",
             "status": "pending",
             "draft": None,
@@ -153,6 +181,13 @@ def get_due_followups() -> list[dict]:
 def generate_followup_draft(step_info: dict) -> dict:
     """Generate a follow-up email draft based on step type.
 
+    5-step sequence:
+      Step 1 (Day 3)  — check_in: Short "did you see it?"
+      Step 2 (Day 5)  — stat_hook: Industry stat that creates urgency
+      Step 3 (Day 8)  — value_add: Case study / ROI data
+      Step 4 (Day 12) — new_angle: Different pain point angle
+      Step 5 (Day 17) — closing: Break-up email
+
     Returns dict with 'subject' and 'body' keys.
     """
     biz = step_info["business_name"]
@@ -177,6 +212,19 @@ def generate_followup_draft(step_info: dict) -> dict:
             f"Happy to do a quick walkthrough if helpful.\n\n"
             f"Jordan\n"
             f"DarkCode AI"
+            f"{_CAN_SPAM_FOOTER}"
+        )
+
+    elif step_type == "stat_hook":
+        body = (
+            f"{greeting},\n\n"
+            f"Quick stat — 68% of customers say they'd switch to a business "
+            f"that responds to questions instantly, even after hours.\n\n"
+            f"The demo I built for {biz} does exactly that. Takes 2 minutes "
+            f"to see it in action.\n\n"
+            f"Jordan\n"
+            f"DarkCode AI"
+            f"{_CAN_SPAM_FOOTER}"
         )
 
     elif step_type == "value_add":
@@ -190,6 +238,20 @@ def generate_followup_draft(step_info: dict) -> dict:
             f"Worth a 2-minute look?\n\n"
             f"Jordan\n"
             f"DarkCode AI"
+            f"{_CAN_SPAM_FOOTER}"
+        )
+
+    elif step_type == "new_angle":
+        body = (
+            f"{greeting},\n\n"
+            f"Different thought — beyond answering questions, the chat "
+            f"assistant I built for {biz} can also capture leads, book "
+            f"appointments, and qualify prospects while you sleep.\n\n"
+            f"One of my clients went from 2 online bookings/week to 11 "
+            f"after adding it. Happy to show you how it works.\n\n"
+            f"Jordan\n"
+            f"DarkCode AI"
+            f"{_CAN_SPAM_FOOTER}"
         )
 
     elif step_type == "closing":
@@ -203,6 +265,7 @@ def generate_followup_draft(step_info: dict) -> dict:
             f"Either way, thanks for your time.\n\n"
             f"Jordan\n"
             f"DarkCode AI"
+            f"{_CAN_SPAM_FOOTER}"
         )
 
     else:

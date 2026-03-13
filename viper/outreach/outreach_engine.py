@@ -24,8 +24,23 @@ from pathlib import Path
 
 import requests
 
-from viper.outreach.sendgrid_mailer import send_email
 from viper.outreach.templates import get_outreach_message, resolve_niche_key
+
+# ── Email sender feature flag ──
+# EMAIL_SENDER=resend|instantly in .env. Default: resend.
+# Zero-downtime migration: flip to "instantly" after warmup completes.
+_EMAIL_SENDER = os.getenv("EMAIL_SENDER", "").lower()
+if not _EMAIL_SENDER:
+    _dotenv = Path.home() / "polymarket-bot" / ".env"
+    if _dotenv.exists():
+        for _line in _dotenv.read_text().splitlines():
+            if _line.startswith("EMAIL_SENDER="):
+                _EMAIL_SENDER = _line.split("=", 1)[1].strip().lower()
+
+if _EMAIL_SENDER == "instantly":
+    from viper.outreach.instantly_mailer import send_email
+else:
+    from viper.outreach.sendgrid_mailer import send_email
 from viper.outreach.outreach_log import already_contacted, log_outreach
 from viper.outreach.approval_queue import queue_lead
 from viper.prospecting.site_auditor import format_findings_for_email

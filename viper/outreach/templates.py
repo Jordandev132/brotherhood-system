@@ -25,6 +25,16 @@ import re
 
 _DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
 
+# ── CAN-SPAM Compliance Footer ──
+# Physical address + unsubscribe link. Required for all cold outreach.
+# Jordan task: Get PO Box at https://www.ipostal1.com/
+_CAN_SPAM_FOOTER = (
+    "\n\n---\n"
+    "DarkCode AI | PO Box address pending\n"
+    "If you'd rather not hear from me, just reply \"unsubscribe\" and "
+    "I'll remove you immediately."
+)
+
 # ── Contact name formatting ──
 
 _MEDICAL_NICHES = {"dental", "dentist", "chiropractor", "orthodontist", "doctor"}
@@ -150,12 +160,16 @@ def get_outreach_message(
     demo_url: str,
     contact_name: str = "",
     findings: str = "",
+    personalized_opener: str = "",
+    personalized_subject: str = "",
 ) -> dict[str, str]:
     """Return personalized subject + body for a niche.
 
     Args:
         findings: Pre-formatted findings string from format_findings_for_email().
                   Each line starts with "- ". First finding becomes the email opener.
+        personalized_opener: Sonnet-generated opener. If provided, overrides _build_opener().
+        personalized_subject: Sonnet-generated subject. If provided, overrides default.
 
     Returns dict with 'subject' and 'body' keys (plain text).
     """
@@ -172,15 +186,20 @@ def get_outreach_message(
             if line.strip()
         ]
 
-    # Build subject from first finding (specific to their site)
-    if finding_lines:
+    # Build subject — Sonnet override or finding-based
+    if personalized_subject:
+        subject = personalized_subject
+    elif finding_lines:
         subject = _subject_from_finding(business_name, finding_lines[0])
     else:
         pain = _FALLBACK_PAIN.get(niche_key, "website")
         subject = f"Quick question about {_possessive(_short_business_name(business_name))} {pain}"
 
-    # Build body: finding opener → cost → demo → CTA
-    opener = _build_opener(finding_lines, business_name, niche_key)
+    # Build body: opener → cost → demo → CTA
+    if personalized_opener:
+        opener = personalized_opener
+    else:
+        opener = _build_opener(finding_lines, business_name, niche_key)
 
     # Only include cost line when we have real audit findings.
     # Without findings, the fallback opener already covers the pain.
@@ -201,6 +220,7 @@ def get_outreach_message(
         f"in 24 hours — on me.\n\n"
         f"Jordan\n"
         f"DarkCode AI"
+        f"{_CAN_SPAM_FOOTER}"
     )
 
     return {"subject": subject, "body": body}

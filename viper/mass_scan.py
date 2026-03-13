@@ -22,18 +22,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from viper.prospecting.maps_scraper import discover_businesses, deduplicate_listings
 from viper.prospecting.chatbot_detector import detect_chatbot, ChatbotDetectionResult
-from viper.prospecting.local_scorer import score_prospect
+from viper.prospecting.local_scorer import score_prospect, score_prospect_v3
 from viper.prospecting.prospect_writer import build_prospect, LocalProspect
 from viper.prospecting.site_auditor import audit_site, crawl_and_audit, format_findings_for_email
+from viper.prospecting.tech_fingerprinter import fingerprint_tech_stack
+from viper.prospecting.pagespeed_auditor import audit_pagespeed
+from viper.prospecting.gbp_enricher import enrich_from_gbp
+from viper.prospecting.apollo_enricher import enrich_email as apollo_enrich_email, extract_domain
 from viper.demos.scraper import scrape_business, ScrapedBusiness
 from viper.outreach.outreach_engine import run_outreach
 from viper.tg_router import send as tg_send
-
-try:
-    from viper.sources.hunter import find_emails, extract_domain
-except ImportError:
-    find_emails = None  # type: ignore[assignment]
-    extract_domain = None  # type: ignore[assignment]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -121,12 +119,17 @@ def scan_city_niche(niche: str, city: str) -> dict:
     result["found"] = len(listings)
     log.info("Found %d unique businesses for %s in %s", len(listings), niche, city)
 
-    # Step 2 — Enrich + detect + score
+    # Step 2 — Enrich + detect + score (V3 pipeline)
     prospects: list[LocalProspect] = []
 
     for i, listing in enumerate(listings, 1):
         scraped: ScrapedBusiness | None = None
         chatbot: ChatbotDetectionResult | None = None
+        tech_stack_data: dict | None = None
+        pagespeed_mobile_data: dict | None = None
+        pagespeed_desktop_data: dict | None = None
+        gbp_data_dict: dict | None = None
+        apollo_contacts_list: list | None = None
 
         if listing.website_url:
             try:
@@ -134,30 +137,80 @@ def scan_city_niche(niche: str, city: str) -> dict:
             except Exception as e:
                 log.debug("Scrape failed for %s: %s", listing.website_url, e)
 
+            # Chatbot detection
+            raw_html = ""
             if scraped and scraped.raw_html:
-                chatbot = detect_chatbot(scraped.raw_html)
+                raw_html = scraped.raw_html
+                chatbot = detect_chatbot(raw_html)
             elif listing.website_url:
                 from viper.demos.scraper import _fetch_raw_html
-                raw = _fetch_raw_html(listing.website_url)
-                if raw:
-                    chatbot = detect_chatbot(raw)
+                raw_html = _fetch_raw_html(listing.website_url) or ""
+                if raw_html:
+                    chatbot = detect_chatbot(raw_html)
+
+            # Tech stack fingerprinting (V3)
+            if raw_html:
+                try:
+                    ts_result = fingerprint_tech_stack(listing.website_url, raw_html)
+                    tech_stack_data = ts_result.to_dict()
+                except Exception as e:
+                    log.debug("Tech fingerprint failed for %s: %s", listing.website_url, e)
+
+            # PageSpeed audit (V3) — mobile + desktop
+            try:
+                ps_mobile = audit_pagespeed(listing.website_url, "mobile")
+                if not ps_mobile.error:
+                    pagespeed_mobile_data = ps_mobile.to_dict()
+                ps_desktop = audit_pagespeed(listing.website_url, "desktop")
+                if not ps_desktop.error:
+                    pagespeed_desktop_data = ps_desktop.to_dict()
+            except Exception as e:
+                log.debug("PageSpeed failed for %s: %s", listing.website_url, e)
 
             time.sleep(SITE_DELAY)
 
-        # Hunter.io fallback
-        if find_emails and scraped and not scraped.email and listing.website_url:
+        # GBP enrichment (V3) — budget guard: pre-score >= 6.0
+        pre_score = score_prospect(listing, scraped, chatbot)
+        if pre_score.total >= 6.0:
+            try:
+                gbp_result = enrich_from_gbp(listing.business_name, listing.address)
+                if not gbp_result.error:
+                    gbp_data_dict = gbp_result.to_dict()
+            except Exception as e:
+                log.debug("GBP enrich failed for %s: %s", listing.business_name, e)
+
+        # Apollo email enrichment (V3) — budget guard: score >= 7.0 AND no email
+        if pre_score.total >= 7.0 and scraped and not scraped.email and listing.website_url:
             domain = extract_domain(listing.website_url)
             if domain:
-                hunter_results = find_emails(domain, limit=2)
-                if hunter_results:
-                    best = hunter_results[0]
-                    scraped.email = best["email"]
-                    name = f"{best.get('first_name', '')} {best.get('last_name', '')}".strip()
-                    if name and not scraped.team_members:
-                        scraped.team_members.append(name)
+                try:
+                    contacts = apollo_enrich_email(domain, listing.business_name, limit=3)
+                    if contacts:
+                        apollo_contacts_list = [c.to_dict() for c in contacts]
+                        # Use best contact's email
+                        best = contacts[0]
+                        scraped.email = best.email
+                        name = f"{best.first_name} {best.last_name}".strip()
+                        if name and not scraped.team_members:
+                            scraped.team_members.append(name)
+                except Exception as e:
+                    log.debug("Apollo enrich failed for %s: %s", listing.business_name, e)
 
-        score = score_prospect(listing, scraped, chatbot)
-        prospect = build_prospect(listing, scraped, chatbot, score)
+        # Score with V3 (8 dimensions) using enrichment data
+        score = score_prospect_v3(
+            listing, scraped, chatbot,
+            tech_stack=tech_stack_data,
+            pagespeed=pagespeed_mobile_data,
+            gbp=gbp_data_dict,
+        )
+        prospect = build_prospect(
+            listing, scraped, chatbot, score,
+            tech_stack=tech_stack_data,
+            pagespeed_mobile=pagespeed_mobile_data,
+            pagespeed_desktop=pagespeed_desktop_data,
+            gbp_data=gbp_data_dict,
+            apollo_contacts=apollo_contacts_list,
+        )
         prospects.append(prospect)
 
     # Sort by score descending

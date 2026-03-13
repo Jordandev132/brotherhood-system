@@ -104,10 +104,18 @@ class CrawlResult:
     # SEO audit fields
     has_meta_title: bool = False
     meta_title: str = ""
+    meta_title_length: int = 0
     has_meta_description: bool = False
     meta_description: str = ""
+    meta_description_length: int = 0
+    has_canonical: bool = False
+    canonical_url: str = ""
     has_og_tags: bool = False
+    has_twitter_card: bool = False
     has_viewport: bool = False
+    has_favicon: bool = False
+    has_lang: bool = False
+    lang: str = ""
     has_schema_markup: bool = False
     schema_types: list[str] = field(default_factory=list)
     missing_alt_images: int = 0
@@ -115,23 +123,130 @@ class CrawlResult:
     has_h1: bool = False
     h1_count: int = 0
     has_ssl: bool = False
+    # V3 PageSpeed fields
+    performance_score: float = 0.0
+    seo_score: float = 0.0
+    accessibility_score: float = 0.0
+    page_speed_opportunities: list[str] = field(default_factory=list)
 
 
 def _analyze_seo(html: str, result: CrawlResult) -> None:
-    """Extract SEO signals from homepage HTML."""
+    """Extract SEO signals from homepage HTML using BeautifulSoup.
+
+    Upgraded from regex to BS4 for reliable parsing of:
+    - Title tag (50-60 chars optimal)
+    - Meta description (150-160 chars optimal)
+    - Canonical URL
+    - Open Graph + Twitter Card tags
+    - Schema markup (LocalBusiness etc.)
+    - Viewport, favicon, lang attribute
+    """
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+    except ImportError:
+        # Fallback to regex if BS4 not installed
+        _analyze_seo_regex(html, result)
+        return
+
     # Meta title
+    title_tag = soup.find("title")
+    if title_tag and title_tag.string:
+        title_text = title_tag.string.strip()
+        result.has_meta_title = True
+        result.meta_title = title_text[:120]
+        result.meta_title_length = len(title_text)
+
+    # Meta description
+    desc_tag = soup.find("meta", attrs={"name": "description"})
+    if desc_tag:
+        desc_content = desc_tag.get("content", "").strip()
+        if desc_content:
+            result.has_meta_description = True
+            result.meta_description = desc_content[:200]
+            result.meta_description_length = len(desc_content)
+
+    # Canonical URL
+    canonical = soup.find("link", attrs={"rel": "canonical"})
+    if canonical:
+        href = canonical.get("href", "").strip()
+        if href:
+            result.has_canonical = True
+            result.canonical_url = href
+
+    # Open Graph tags
+    og_tag = soup.find("meta", attrs={"property": re.compile(r"^og:")})
+    if og_tag:
+        result.has_og_tags = True
+
+    # Twitter Card
+    twitter_tag = soup.find("meta", attrs={"name": re.compile(r"^twitter:")})
+    if twitter_tag:
+        result.has_twitter_card = True
+
+    # Viewport (mobile responsiveness)
+    viewport = soup.find("meta", attrs={"name": "viewport"})
+    if viewport:
+        result.has_viewport = True
+
+    # Favicon
+    favicon = soup.find("link", attrs={"rel": re.compile(r"icon", re.IGNORECASE)})
+    if favicon:
+        result.has_favicon = True
+
+    # Lang attribute
+    html_tag = soup.find("html")
+    if html_tag:
+        lang = html_tag.get("lang", "").strip()
+        if lang:
+            result.has_lang = True
+            result.lang = lang
+
+    # H1 tags
+    h1_tags = soup.find_all("h1")
+    result.h1_count = len(h1_tags)
+    result.has_h1 = result.h1_count > 0
+
+    # Image alt text audit
+    img_tags = soup.find_all("img")
+    result.total_images = len(img_tags)
+    for img in img_tags:
+        alt = img.get("alt", "").strip()
+        if not alt:
+            result.missing_alt_images += 1
+
+    # Schema markup (JSON-LD)
+    ld_scripts = soup.find_all("script", attrs={"type": "application/ld+json"})
+    if ld_scripts:
+        result.has_schema_markup = True
+        for script in ld_scripts:
+            try:
+                sd = json.loads(script.string or "")
+                st = sd.get("@type", "")
+                if st and st not in result.schema_types:
+                    result.schema_types.append(st)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+    # Also check microdata
+    if not result.has_schema_markup:
+        microdata = soup.find(attrs={"itemscope": True})
+        if microdata:
+            result.has_schema_markup = True
+
+
+def _analyze_seo_regex(html: str, result: CrawlResult) -> None:
+    """Fallback regex-based SEO analysis when BS4 is not available."""
     title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     if title_m and title_m.group(1).strip():
         result.has_meta_title = True
         result.meta_title = title_m.group(1).strip()[:120]
 
-    # Meta description
     desc_m = re.search(
         r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']*)["\']',
         html, re.IGNORECASE,
     )
     if not desc_m:
-        # Try reversed attribute order
         desc_m = re.search(
             r'<meta[^>]*content=["\']([^"\']*)["\'][^>]*name=["\']description["\']',
             html, re.IGNORECASE,
@@ -140,20 +255,16 @@ def _analyze_seo(html: str, result: CrawlResult) -> None:
         result.has_meta_description = True
         result.meta_description = desc_m.group(1).strip()[:200]
 
-    # Open Graph tags
     if re.search(r'<meta[^>]*property=["\']og:', html, re.IGNORECASE):
         result.has_og_tags = True
 
-    # Viewport (mobile responsiveness)
     if re.search(r'<meta[^>]*name=["\']viewport["\']', html, re.IGNORECASE):
         result.has_viewport = True
 
-    # H1 tags
     h1_matches = re.findall(r"<h1[^>]*>", html, re.IGNORECASE)
     result.h1_count = len(h1_matches)
     result.has_h1 = result.h1_count > 0
 
-    # Image alt text audit
     img_tags = re.findall(r"<img[^>]*>", html, re.IGNORECASE)
     result.total_images = len(img_tags)
     for img in img_tags:
@@ -302,10 +413,18 @@ def _save_crawl_result(prospect_name: str, crawl: CrawlResult) -> None:
         "seo": {
             "has_meta_title": crawl.has_meta_title,
             "meta_title": crawl.meta_title,
+            "meta_title_length": crawl.meta_title_length,
             "has_meta_description": crawl.has_meta_description,
             "meta_description": crawl.meta_description,
+            "meta_description_length": crawl.meta_description_length,
+            "has_canonical": crawl.has_canonical,
+            "canonical_url": crawl.canonical_url,
             "has_og_tags": crawl.has_og_tags,
+            "has_twitter_card": crawl.has_twitter_card,
             "has_viewport": crawl.has_viewport,
+            "has_favicon": crawl.has_favicon,
+            "has_lang": crawl.has_lang,
+            "lang": crawl.lang,
             "has_schema_markup": crawl.has_schema_markup,
             "schema_types": crawl.schema_types,
             "has_h1": crawl.has_h1,
@@ -313,6 +432,12 @@ def _save_crawl_result(prospect_name: str, crawl: CrawlResult) -> None:
             "has_ssl": crawl.has_ssl,
             "total_images": crawl.total_images,
             "missing_alt_images": crawl.missing_alt_images,
+        },
+        "pagespeed": {
+            "performance_score": crawl.performance_score,
+            "seo_score": crawl.seo_score,
+            "accessibility_score": crawl.accessibility_score,
+            "opportunities": crawl.page_speed_opportunities,
         },
     }
     filepath.write_text(json.dumps(data, indent=2))

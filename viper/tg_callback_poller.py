@@ -203,7 +203,7 @@ def _build_demo_and_review(bot_token: str, lead: dict) -> None:
         lead["demo_url"] = demo_url
         lead["demo_is_custom"] = True
 
-        # 5. Regenerate email with custom demo URL
+        # 5. Sonnet personalization (V3) — two-pass personalizer
         from viper.outreach.templates import get_outreach_message, resolve_niche_key
         from viper.prospecting.site_auditor import format_findings_for_email
 
@@ -213,12 +213,37 @@ def _build_demo_and_review(bot_token: str, lead: dict) -> None:
         if pitch_angle:
             findings_text = pitch_angle
 
+        # Try Sonnet personalization
+        personalized_opener = ""
+        personalized_subject = ""
+        try:
+            from viper.outreach.sonnet_personalizer import personalize_email
+            prospect_data = lead.get("prospect_data", {})
+            contact_name = lead.get("contact_name", "")
+            personalized = personalize_email(
+                prospect_data=prospect_data,
+                crawl_data=None,
+                gbp_data=prospect_data.get("gbp_data"),
+                niche=niche,
+                contact_name=contact_name,
+            )
+            personalized_opener = personalized.get("opener", "")
+            personalized_subject = personalized.get("subject", "")
+            if personalized_opener:
+                log.info("[DEMO_FLOW] Sonnet personalized opener for %s", biz)
+                # Store on prospect for reference
+                lead["prospect_data"]["personalized_opener"] = personalized_opener
+        except Exception as e:
+            log.warning("[DEMO_FLOW] Sonnet personalization failed for %s: %s (using template)", biz, e)
+
         msg = get_outreach_message(
             niche=niche_key,
             business_name=biz,
             demo_url=demo_url,
             contact_name=lead.get("contact_name", ""),
             findings=findings_text,
+            personalized_opener=personalized_opener,
+            personalized_subject=personalized_subject,
         )
         lead["subject"] = msg["subject"]
         lead["body"] = msg["body"]

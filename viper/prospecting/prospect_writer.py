@@ -243,6 +243,18 @@ class LocalProspect:
     pitch_angle: str = ""
     scraped_at: str = ""
     scrape_quality: int = 0
+    # V3 enrichment fields
+    tech_stack: dict = field(default_factory=dict)
+    pagespeed_mobile: dict = field(default_factory=dict)
+    pagespeed_desktop: dict = field(default_factory=dict)
+    gbp_data: dict = field(default_factory=dict)
+    apollo_contacts: list = field(default_factory=list)
+    review_response_rate: float = 0.0
+    performance_score: float = 0.0
+    seo_score: float = 0.0
+    accessibility_score: float = 0.0
+    personalized_opener: str = ""
+    audit_findings: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -286,9 +298,30 @@ def build_prospect(
     scraped: ScrapedBusiness | None,
     chatbot: ChatbotDetectionResult | None,
     score: ProspectScore,
+    *,
+    tech_stack: dict | None = None,
+    pagespeed_mobile: dict | None = None,
+    pagespeed_desktop: dict | None = None,
+    gbp_data: dict | None = None,
+    apollo_contacts: list | None = None,
 ) -> LocalProspect:
     """Assemble a LocalProspect from pipeline components."""
     now = datetime.now(_TZ).isoformat(timespec="seconds")
+
+    # Extract review_response_rate from GBP data if available
+    review_response_rate = 0.0
+    if gbp_data:
+        review_response_rate = gbp_data.get("review_response_rate", 0.0)
+
+    # Extract PageSpeed scores
+    perf_score = 0.0
+    seo_sc = 0.0
+    access_score = 0.0
+    if pagespeed_mobile:
+        perf_score = pagespeed_mobile.get("performance_score", 0.0)
+        seo_sc = pagespeed_mobile.get("seo_score", 0.0)
+        access_score = pagespeed_mobile.get("accessibility_score", 0.0)
+
     return LocalProspect(
         business_name=listing.business_name,
         contact_name=_pick_contact_name(listing, scraped),
@@ -309,6 +342,15 @@ def build_prospect(
         pitch_angle=score.pitch_angle,
         scraped_at=now,
         scrape_quality=scraped.quality_score if scraped else 0,
+        tech_stack=tech_stack or {},
+        pagespeed_mobile=pagespeed_mobile or {},
+        pagespeed_desktop=pagespeed_desktop or {},
+        gbp_data=gbp_data or {},
+        apollo_contacts=apollo_contacts or [],
+        review_response_rate=review_response_rate,
+        performance_score=perf_score,
+        seo_score=seo_sc,
+        accessibility_score=access_score,
     )
 
 
