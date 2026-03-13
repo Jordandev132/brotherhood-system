@@ -460,22 +460,38 @@ _FALLBACK_PAIN: dict[str, str] = {
 
 # Map common niche search terms to template keys
 NICHE_MAP: dict[str, str] = {
+    # Identity mappings — canonical keys must resolve to themselves
+    "dental": "dental",
+    "real_estate": "real_estate",
+    "commercial_re": "commercial_re",
+    "chiropractor": "chiropractor",
+    "auto_repair": "auto_repair",
+    # Dental aliases
     "dental practice": "dental",
     "dental office": "dental",
+    "dental clinic": "dental",
     "dentist": "dental",
     "orthodontist": "dental",
     "pediatric dentist": "dental",
+    # Residential RE aliases
     "real estate": "real_estate",
     "realtor": "real_estate",
+    "realty": "real_estate",
     "real estate agent": "real_estate",
     "real estate agency": "real_estate",
+    "residential": "real_estate",
+    "residential real estate": "real_estate",
+    # Commercial RE aliases
     "commercial real estate": "commercial_re",
+    "commercial re": "commercial_re",
     "commercial": "commercial_re",
     "cre": "commercial_re",
     "property management": "commercial_re",
     "investment group": "commercial_re",
+    # Chiropractor aliases
     "chiropractor": "chiropractor",
     "chiropractic": "chiropractor",
+    # Auto repair aliases
     "auto repair": "auto_repair",
     "auto shop": "auto_repair",
     "mechanic": "auto_repair",
