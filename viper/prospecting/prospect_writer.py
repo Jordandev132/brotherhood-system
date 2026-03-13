@@ -55,16 +55,23 @@ def name_from_email(email: str) -> str:
     Patterns handled:
     - first.last@ → First
     - FIRST.LAST@ → First
-    - first@ (short) → First
+    - first@ (short, in _COMMON_FIRST_NAMES only) → First
     - chrismehr@ → Chris (prefix match against common names)
     - info@, office@ etc. → "" (generic, skip)
+    - sage@cambridgesage → "" (local part in domain = business handle)
     """
     if not email or "@" not in email:
         return ""
     local = email.split("@")[0].lower().strip()
+    domain_prefix = email.split("@")[1].split(".")[0].lower()
 
     # Skip generic prefixes
     if local in _GENERIC_EMAIL_PREFIXES:
+        return ""
+
+    # Skip business handles — local part embedded in domain
+    # sage@cambridgesage, nico@nicorealty, etc.
+    if len(local) >= 3 and local in domain_prefix:
         return ""
 
     # first.last@ or first.middle.last@ → use first part
@@ -77,17 +84,17 @@ def name_from_email(email: str) -> str:
         # "johnj" stuck together — strip trailing single initial
         if len(first) > 2 and first[-1].isalpha() and first[:-1] in _COMMON_FIRST_NAMES:
             first = first[:-1]
+        if len(first) >= 2 and first in _COMMON_FIRST_NAMES:
+            return first.capitalize()
         if len(first) >= 2 and first not in _GENERIC_EMAIL_PREFIXES:
             return first.capitalize()
 
-    # Short local part (2-8 chars) that's all alpha → likely a first name
+    # Short local part — ONLY accept if in _COMMON_FIRST_NAMES
     if local.isalpha() and 2 <= len(local) <= 8:
         if local in _COMMON_FIRST_NAMES:
             return local.capitalize()
-        # 2-5 char alpha-only that isn't in our list — still likely a name
-        # (e.g. "sage", "blake"). Longer ones might be concatenated (jfermin).
-        if len(local) <= 5:
-            return local.capitalize()
+        # NOT in our list? Don't guess. Return empty.
+        return ""
 
     # Longer concatenated names — try prefix match (chrismehr → Chris)
     if local.isalpha() and len(local) > 8:
@@ -151,6 +158,65 @@ def _extract_person_name(text: str) -> str:
 
     return ""
 
+# ── Contact name validation ──
+
+# Words that are roles/titles/business terms — never a person's first name
+_BAD_CONTACT_WORDS = frozenset([
+    "broker", "partner", "manager", "team", "staff", "office", "admin",
+    "owner", "president", "ceo", "cfo", "cto", "agent", "associate",
+    "associates", "director", "coordinator", "specialist", "consultant",
+    "group", "company", "corp", "corporation", "services", "realty",
+    "dental", "medical", "health", "clinic", "practice", "center",
+    "inc", "llc", "llp", "pllc", "pc", "dds", "dmd", "md",
+    "premier", "golden", "century", "national", "american", "united",
+    "north", "south", "east", "west", "central", "valley",
+    "watch", "click", "view", "read", "the",
+])
+
+
+def validate_contact_name(name: str, business_name: str = "") -> bool:
+    """Check if an extracted contact name is actually usable in a greeting.
+
+    Returns False for:
+    - Empty/whitespace names
+    - Role/title words (Broker, Partner, Manager)
+    - Names containing slashes, numbers, special chars
+    - Single-character names
+    - Single-word names that appear in the business name but aren't the
+      FIRST word of a "Person Name, Title" pattern
+    """
+    if not name or not name.strip():
+        return False
+
+    clean = name.strip()
+
+    # Reject if contains slash, numbers, or non-name chars
+    if any(c in clean for c in "/\\@#$%^&*()0123456789"):
+        return False
+
+    # Check each word against bad words list
+    for word in clean.lower().split():
+        if word in _BAD_CONTACT_WORDS:
+            return False
+
+    # Strip Dr. prefix for length check
+    stripped = re.sub(r'^dr\\.?\\s*', '', clean, flags=re.IGNORECASE).strip()
+    if len(stripped) < 2:
+        return False
+
+    # Single-word name that appears in the business name?
+    # Allow only if the business name STARTS with that name (person-named biz)
+    if business_name and " " not in stripped:
+        biz_lower = business_name.lower()
+        name_lower = stripped.lower()
+        if name_lower in biz_lower.split():
+            biz_first = biz_lower.split()[0] if biz_lower else ""
+            if name_lower != biz_first:
+                return False
+
+    return True
+
+
 _DATA_DIR = Path.home() / "polymarket-bot" / "data" / "prospects"
 _TZ = ZoneInfo("America/New_York")
 
@@ -183,29 +249,34 @@ class LocalProspect:
 
 
 def _pick_contact_name(listing: MapsListing, scraped: ScrapedBusiness | None) -> str:
-    """Extract contact first name. Priority: email → business name → website scrape."""
+    """Extract contact first name. Priority: email → business name → website scrape.
+
+    Every extracted name is validated before returning. If validation fails,
+    returns "" so the lead gets held as needs_contact_name.
+    """
+    biz = listing.business_name
+
     # 1. Email address (first.last@, chrismehr@, nico@ etc.)
     email = scraped.email if scraped else ""
     name = name_from_email(email)
-    if name:
+    if name and validate_contact_name(name, biz):
         return name
 
     # 2. Business name ("Darcy Bento, South Boston Realtor" → Darcy)
-    name = name_from_business(listing.business_name)
-    if name:
+    name = name_from_business(biz)
+    if name and validate_contact_name(name, biz):
         return name
 
     # 3. Website scrape (Dr. pattern, schema.org, team cards — fallback)
     if scraped and scraped.team_members:
-        # Use first name only from scraped team member for the greeting
         full = scraped.team_members[0]
-        # "Dr. Firstname Lastname" → "Dr. Firstname"
         if full.startswith("Dr.") or full.startswith("Dr "):
             parts = full.split()
-            return " ".join(parts[:2]) if len(parts) >= 2 else full
-        # "Firstname Lastname, DDS" → "Firstname"
-        first = full.split()[0].rstrip(",")
-        return first
+            candidate = " ".join(parts[:2]) if len(parts) >= 2 else full
+        else:
+            candidate = full.split()[0].rstrip(",")
+        if validate_contact_name(candidate, biz):
+            return candidate
 
     return ""
 

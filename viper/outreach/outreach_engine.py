@@ -30,6 +30,7 @@ from viper.outreach.outreach_log import already_contacted, log_outreach
 from viper.outreach.approval_queue import queue_lead
 from viper.prospecting.site_auditor import format_findings_for_email
 from viper.outreach.email_sequences import create_sequence
+from viper.prospecting.prospect_writer import validate_contact_name
 from viper.tg_router import send as tg_send
 
 log = logging.getLogger(__name__)
@@ -312,9 +313,13 @@ def run_outreach(
             stats["skipped"] += 1
             continue
 
-        # CONTACT NAME GATE — never send "Hi team," emails.
-        # If no contact name was found, hold the lead for manual lookup.
-        has_contact_name = bool(p.contact_name and p.contact_name.strip())
+        # CONTACT NAME GATE — never send emails with garbage names.
+        # Validates the name is a real person, not a role/title/business word.
+        has_contact_name = bool(
+            p.contact_name
+            and p.contact_name.strip()
+            and validate_contact_name(p.contact_name, p.business_name)
+        )
 
         # Format audit findings for email (if available)
         findings_text = ""
