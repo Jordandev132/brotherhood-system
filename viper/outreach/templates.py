@@ -181,13 +181,19 @@ def get_outreach_message(
 
     # Build body: finding opener → cost → demo → CTA
     opener = _build_opener(finding_lines, business_name, niche_key)
-    niche_body = _NICHE_BODIES.get(niche_key, _NICHE_BODIES["general"])
-    cost_line = niche_body["cost"].format(business_name=business_name)
+
+    # Only include cost line when we have real audit findings.
+    # Without findings, the fallback opener already covers the pain.
+    if finding_lines:
+        niche_body = _NICHE_BODIES.get(niche_key, _NICHE_BODIES["general"])
+        cost_line = niche_body["cost"].format(business_name=business_name)
+        middle = f"{opener}\n\n{cost_line}"
+    else:
+        middle = opener
 
     body = (
         f"{greeting},\n\n"
-        f"{opener}\n\n"
-        f"{cost_line}\n\n"
+        f"{middle}\n\n"
         f"I built a working demo for {_short_business_name(business_name)} "
         f"— you can try it here:\n"
         f"{demo_url}\n\n"
