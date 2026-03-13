@@ -472,6 +472,8 @@ NICHE_MAP: dict[str, str] = {
     "commercial real estate": "commercial_re",
     "commercial": "commercial_re",
     "cre": "commercial_re",
+    "property management": "commercial_re",
+    "investment group": "commercial_re",
     "chiropractor": "chiropractor",
     "chiropractic": "chiropractor",
     "auto repair": "auto_repair",

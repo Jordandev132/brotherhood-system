@@ -44,6 +44,52 @@ _DEMO_BASE = "https://darkcode-ai.github.io/chatbot-demos/"
 _PLACEHOLDER_DEMO = "https://darkcode-ai.github.io/chatbot-demos/dental-demo/"
 
 
+# ── Commercial RE auto-detection ──
+# When mass_scan searches "real estate", commercial firms appear too.
+# These keywords in the business name mean it's commercial, not residential.
+_COMMERCIAL_RE_KEYWORDS = [
+    "nai ",          # NAI Global network
+    "commercial",
+    "investment group",
+    "investment realty",
+    "property management",
+    "property mgmt",
+    "brokerage",
+    "cbre",
+    "jll",
+    "cushman",
+    "marcus & millichap",
+    "colliers",
+    "newmark",
+    "avison young",
+    "lee & associates",
+    "svn ",
+    "industrial",
+    "warehouse",
+    "tenant rep",
+]
+
+
+def _detect_commercial_re(business_name: str, niche: str) -> str:
+    """Auto-detect commercial RE firms tagged as residential.
+
+    If niche is already commercial_re, return as-is.
+    If niche is real_estate/real estate and business name contains
+    commercial RE keywords, upgrade to commercial real estate.
+    """
+    if "commercial" in niche.lower():
+        return niche  # already correct
+    if niche.lower() not in ("real estate", "real_estate", "realtor", "realty"):
+        return niche  # not RE at all, leave alone
+
+    name_lower = business_name.lower()
+    for kw in _COMMERCIAL_RE_KEYWORDS:
+        if kw in name_lower:
+            log.info("Auto-detected commercial RE: %s (keyword: %s)", business_name, kw.strip())
+            return "commercial real estate"
+    return niche
+
+
 # Telegram Bot API — read from env or Shelby's .env
 _TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 _TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -265,6 +311,8 @@ def run_outreach(
     niche_key = resolve_niche_key(niche)
     stats = {"queued": 0, "skipped": 0, "already_contacted": 0}
 
+    # NOTE: per-prospect commercial RE detection happens in the loop below
+
     qualified = [p for p in prospects if p.score >= min_score]
     if not qualified:
         print(f"  No prospects scored >= {min_score}. Nothing to queue.")
@@ -303,6 +351,10 @@ def run_outreach(
             stats["already_contacted"] += 1
             continue
 
+        # Auto-detect commercial RE for this specific prospect
+        prospect_niche = _detect_commercial_re(p.business_name, niche)
+        prospect_niche_key = resolve_niche_key(prospect_niche)
+
         # Demo URL: placeholder at queue time. Custom demo is auto-built
         # at Gate 1 YES (demo_builder + demo_deployer). The email gets
         # regenerated with the real custom URL before Gate 2.
@@ -334,7 +386,7 @@ def run_outreach(
 
         # Build message
         msg = get_outreach_message(
-            niche=niche_key,
+            niche=prospect_niche_key,
             business_name=p.business_name,
             demo_url=demo_url,
             contact_name=p.contact_name,
@@ -360,7 +412,7 @@ def run_outreach(
         lead_id = queue_lead(
             business_name=p.business_name,
             email=p.email,
-            niche=niche,
+            niche=prospect_niche,
             city=city,
             score=p.score,
             chatbot_confidence=p.chatbot_confidence,
@@ -391,7 +443,7 @@ def run_outreach(
             print(f"  [outreach] HELD {p.business_name} — needs contact name (lead {lead_id})")
         else:
             # Send Gate 1 TG approval request to Jordan (lead info only)
-            _send_approval_request(lead_id, p, niche_key)
+            _send_approval_request(lead_id, p, prospect_niche_key)
             stats["queued"] += 1
             print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
 

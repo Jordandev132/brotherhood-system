@@ -60,8 +60,15 @@ _TEMPLATE_MAP = {
 
 # Niche aliases — normalize sloppy input to canonical niche
 _NICHE_ALIASES = {
+    # Dental
     "dental": "dental",
     "dentist": "dental",
+    "dental practice": "dental",
+    "dental office": "dental",
+    "dental clinic": "dental",
+    "orthodontist": "dental",
+    "pediatric dentist": "dental",
+    # Residential RE
     "real_estate": "real_estate",
     "real estate": "real_estate",
     "realestate": "real_estate",
@@ -71,11 +78,16 @@ _NICHE_ALIASES = {
     "realty": "real_estate",
     "residential": "real_estate",
     "residential real estate": "real_estate",
+    "real estate agent": "real_estate",
+    "real estate agency": "real_estate",
+    # Commercial RE
     "commercial_re": "commercial_re",
     "commercial re": "commercial_re",
     "commercial": "commercial_re",
     "commercial real estate": "commercial_re",
     "cre": "commercial_re",
+    "property management": "commercial_re",
+    "investment group": "commercial_re",
 }
 
 # Cross-contamination blocklists — if ANY of these appear in the wrong
