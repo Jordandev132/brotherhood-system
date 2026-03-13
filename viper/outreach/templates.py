@@ -33,6 +33,14 @@ _MEDICAL_NICHES = {"dental", "dentist", "chiropractor", "orthodontist", "doctor"
 _INITIAL_RE = re.compile(r'^[A-Z]\.$')
 
 
+def _possessive(name: str) -> str:
+    """Grammatically correct possessive: 'Associates' -> "Associates'" not "Associates's"."""
+    name = name.strip()
+    if name.lower().endswith("s"):
+        return f"{name}'"
+    return f"{name}'s"
+
+
 def format_greeting_name(raw_name: str, niche: str = "") -> str:
     """Format a contact name for email greetings.
 
@@ -122,10 +130,8 @@ def get_outreach_message(
     if finding_lines:
         subject = _subject_from_finding(business_name, finding_lines[0])
     else:
-        subject = _FALLBACK_SUBJECTS.get(
-            niche_key,
-            f"Quick question about {business_name}'s website",
-        ).format(business_name=business_name)
+        pain = _FALLBACK_PAIN.get(niche_key, "website")
+        subject = f"Quick question about {_possessive(business_name)} {pain}"
 
     # Build body: finding opener → cost → demo → CTA
     opener = _build_opener(finding_lines, business_name, niche_key)
@@ -179,7 +185,7 @@ def _subject_from_finding(business_name: str, finding: str) -> str:
     else:
         pain = "website"
 
-    return f"Quick question about {business_name}'s {pain}"
+    return f"Quick question about {_possessive(business_name)} {pain}"
 
 
 _NICHE_LABELS: dict[str, str] = {
@@ -397,13 +403,13 @@ _NICHE_BODIES: dict[str, dict[str, str]] = {
 }
 
 # Fallback subjects when no audit findings are available
-_FALLBACK_SUBJECTS: dict[str, str] = {
-    "dental": "Quick question about {business_name}'s patient inquiries",
-    "real_estate": "Quick question about {business_name}'s after-hours leads",
-    "commercial_re": "Quick question about {business_name}'s tenant inquiries",
-    "chiropractor": "Quick question about {business_name}'s patient intake",
-    "auto_repair": "Quick question about {business_name}'s missed calls",
-    "general": "Quick question about {business_name}'s website",
+_FALLBACK_PAIN: dict[str, str] = {
+    "dental": "patient inquiries",
+    "real_estate": "after-hours leads",
+    "commercial_re": "tenant inquiries",
+    "chiropractor": "patient intake",
+    "auto_repair": "missed calls",
+    "general": "website",
 }
 
 
