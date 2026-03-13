@@ -177,7 +177,7 @@ def _send_tg(text: str, buttons: list[list[dict]] | None = None) -> bool:
     return tg_send(text, channel="OUTREACH", buttons=buttons)
 
 
-def _send_approval_request(lead_id: str, prospect, niche_key: str) -> None:
+def _send_approval_request(lead_id: str, prospect, niche_key: str, city: str = "") -> None:
     """Gate 1: Send TG message with lead info only. YES/NO buttons."""
     chatbot_line = "No" if prospect.chatbot_confidence == "NOT_FOUND" else "Unknown (scanner uncertain)"
 
@@ -192,9 +192,12 @@ def _send_approval_request(lead_id: str, prospect, niche_key: str) -> None:
 
     hot_label = " \U0001f525 HOT" if prospect.score >= 8.0 else ""
 
+    location_line = f"Location: {city}\n" if city else ""
+
     text = (
         f"<b>GATE 1 — New Lead{hot_label}</b>\n\n"
         f"Business: {prospect.business_name}\n"
+        f"{location_line}"
         f"Niche: {niche_key}\n"
         f"Email: {email_line}{contact_line}\n"
         f"Website: {prospect.website}\n"
@@ -454,6 +457,7 @@ def run_outreach(
             _send_tg(
                 f"<b>HELD — needs contact name</b>\n\n"
                 f"Business: {p.business_name}\n"
+                f"Location: {city}\n"
                 f"Website: {getattr(p, 'website', '')}\n"
                 f"Email: {p.email}\n"
                 f"Score: {p.score}/10\n\n"
@@ -463,7 +467,7 @@ def run_outreach(
             print(f"  [outreach] HELD {p.business_name} — needs contact name (lead {lead_id})")
         else:
             # Send Gate 1 TG approval request to Jordan (lead info only)
-            _send_approval_request(lead_id, p, prospect_niche_key)
+            _send_approval_request(lead_id, p, prospect_niche_key, city)
             stats["queued"] += 1
             print(f"  [outreach] Queued {p.business_name} ({p.email}) → TG sent to Jordan (lead {lead_id})")
 
