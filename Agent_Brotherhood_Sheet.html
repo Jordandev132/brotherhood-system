@@ -167,7 +167,7 @@
     <div class="agent-badge" style="background: var(--shelby);">SH</div>
     <div class="agent-info">
       <h2>SHELBY</h2>
-      <div class="role">The Commander &bull; Team Leader &bull; Port 7777 &bull; TG Bot (PTB v20.8)</div>
+      <div class="role">The Commander &bull; Team Leader &bull; V2 Phase 2+3 &bull; TG Bot (PTB v20.8)</div>
       <div class="loc">~/shelby/</div>
     </div>
     <div class="status-badge status-live">LIVE</div>
@@ -178,21 +178,21 @@
       <div class="intel-title">Intelligence Meter</div>
       <div class="intel-grid">
         <div class="intel-item"><span class="intel-label">Team Awareness</span><div class="intel-bar-bg"><div class="intel-bar" style="width:85%;background:var(--shelby);"></div></div><span class="intel-val">85</span></div>
-        <div class="intel-item"><span class="intel-label">Task Management</span><div class="intel-bar-bg"><div class="intel-bar" style="width:78%;background:var(--shelby);"></div></div><span class="intel-val">78</span></div>
+        <div class="intel-item"><span class="intel-label">Task Management</span><div class="intel-bar-bg"><div class="intel-bar" style="width:92%;background:var(--shelby);"></div></div><span class="intel-val">78</span></div>
         <div class="intel-item"><span class="intel-label">Communication</span><div class="intel-bar-bg"><div class="intel-bar" style="width:90%;background:var(--shelby);"></div></div><span class="intel-val">90</span></div>
-        <div class="intel-item"><span class="intel-label">Scheduling</span><div class="intel-bar-bg"><div class="intel-bar" style="width:82%;background:var(--shelby);"></div></div><span class="intel-val">82</span></div>
+        <div class="intel-item"><span class="intel-label">Scheduling</span><div class="intel-bar-bg"><div class="intel-bar" style="width:90%;background:var(--shelby);"></div></div><span class="intel-val">82</span></div>
         <div class="intel-item"><span class="intel-label">Decision Quality</span><div class="intel-bar-bg"><div class="intel-bar" style="width:76%;background:var(--shelby);"></div></div><span class="intel-val">76</span></div>
       </div>
-      <div class="intel-overall"><span class="lbl">Overall:</span><span class="val">82</span></div>
+      <div class="intel-overall"><span class="lbl">Overall:</span><span class="val">88</span></div>
     </div>
     <div class="section-label">Skills</div>
     <div class="skills-grid">
       <div class="skill-group"><div class="skill-group-name">Agent Management</div><ul class="skill-list"><li>check_agent_status</li><li>morning_briefing</li><li>broadcast_command</li><li>assign_task_to_agent</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">Task & Finance</div><ul class="skill-list"><li>add_task / complete_task / list_tasks</li><li>add_expense / add_income</li><li>finance_report / budget_status</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">TG Bot (PTB v20.8 Async)</div><ul class="skill-list"><li>14 command handlers (async)</li><li>3 services: notifier, charts, scheduler</li><li>PicklePersistence for state survival</li><li>Interactive inline keyboards</li></ul></div>
-      <div class="skill-group"><div class="skill-group-name">Notifications & Scheduling</div><ul class="skill-list"><li>Priority-based alerts (P0&ndash;P3)</li><li>4 scheduled reports (morning/midday/EOD/weekly)</li><li>Content approval flow via Telegram</li><li>Thor task submission (ConversationHandler)</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">V2 Briefs & Scheduling</div><ul class="skill-list"><li>9 AM Morning Brief (leads, tasks, agents, costs)</li><li>9 PM Daily Wrap (today, tomorrow, blockers)</li><li>Stale task nudge (every 12h, >3 days)</li><li>Content approval flow via Telegram</li></ul></div>
       <div class="skill-group"><div class="skill-group-name">Charts & Visuals</div><ul class="skill-list"><li>Matplotlib dark-theme charts</li><li>P/L curves, indicator gauges</li><li>Intelligence spider diagrams</li><li>Agent drill-down inline keyboards</li></ul></div>
-      <div class="skill-group"><div class="skill-group-name">Jordan Task Tracker</div><ul class="skill-list"><li>jordan_tasks.json (manual tasks)</li><li>Claude Overseer reminders (4h cooldown)</li><li>/tasks shows pending above Thor queue</li><li>TG notifications for blocking tasks</li></ul></div>
+      <div class="skill-group"><div class="skill-group-name">V2 Task & Routing</div><ul class="skill-list"><li>Natural language task add ("remind me to...")</li><li>Smart agent routing (Thor/Viper/Atlas/Soren)</li><li>Intent detection: COMMAND/STORE/INFO/QUESTION</li><li>Context memory (shelby_memory.json)</li></ul></div>
     </div>
   </div>
 </div>
