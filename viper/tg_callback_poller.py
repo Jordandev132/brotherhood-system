@@ -461,8 +461,54 @@ def _poll_bot(bot_token: str, name: str) -> None:
             time.sleep(5)
 
 
+def _auto_regen_gate2_emails() -> None:
+    """Auto-regenerate all lead_approved emails with latest templates.
+
+    Runs ONCE on Viper startup. Ensures code/template changes
+    automatically propagate to existing leads without manual intervention.
+    Also cleans up duplicate Gate 2 messages.
+    """
+    try:
+        from viper.outreach.approval_queue import _load_queue, _save_queue
+        from viper.outreach.templates import get_outreach_message, resolve_niche_key
+
+        queue = _load_queue()
+        regen = 0
+        for lead in queue:
+            if lead.get("status") != "lead_approved":
+                continue
+            if not lead.get("contact_name"):
+                continue
+
+            nk = resolve_niche_key(lead.get("niche", ""))
+            findings = lead.get("prospect_data", {}).get("pitch_angle", "")
+            msg = get_outreach_message(
+                niche=nk,
+                business_name=lead["business_name"],
+                demo_url=lead.get("demo_url", ""),
+                contact_name=lead.get("contact_name", ""),
+                findings=findings,
+            )
+            if lead.get("subject") != msg["subject"] or lead.get("body") != msg["body"]:
+                lead["subject"] = msg["subject"]
+                lead["body"] = msg["body"]
+                regen += 1
+                log.info("[STARTUP] Regenerated email for %s", lead["business_name"])
+
+        if regen:
+            _save_queue(queue)
+            log.info("[STARTUP] Auto-regenerated %d lead_approved emails with latest templates", regen)
+        else:
+            log.info("[STARTUP] All lead_approved emails are up-to-date")
+    except Exception as e:
+        log.error("[STARTUP] Auto-regen failed: %s", e)
+
+
 def start_polling() -> None:
     """Start callback pollers for all configured Viper bots. Non-blocking."""
+    # Auto-regenerate lead_approved emails with latest templates
+    _auto_regen_gate2_emails()
+
     tokens = _load_bot_tokens()
 
     if tokens["VIPER_INBOUND_BOT_TOKEN"]:

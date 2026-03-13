@@ -102,9 +102,27 @@ def send(
     try:
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
-            return True
+            # Return message_id so callers can track/delete messages later
+            data = resp.json()
+            return data.get("result", {}).get("message_id", True)
         log.error("[TG_ROUTER] API error %d: %s", resp.status_code, resp.text[:200])
         return False
     except Exception as e:
         log.error("[TG_ROUTER] Send failed: %s", e)
+        return False
+
+
+def delete_message(channel: str, message_id: int) -> bool:
+    """Delete a specific message from a Viper TG channel."""
+    bot_tk, chat_id, _ = _resolve(channel)
+    if not bot_tk or not chat_id:
+        return False
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_tk}/deleteMessage",
+            json={"chat_id": chat_id, "message_id": message_id},
+            timeout=5,
+        )
+        return resp.json().get("ok", False)
+    except Exception:
         return False

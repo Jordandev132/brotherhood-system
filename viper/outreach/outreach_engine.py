@@ -31,7 +31,7 @@ from viper.outreach.approval_queue import queue_lead
 from viper.prospecting.site_auditor import format_findings_for_email
 from viper.outreach.email_sequences import create_sequence
 from viper.prospecting.prospect_writer import validate_contact_name
-from viper.tg_router import send as tg_send
+from viper.tg_router import send as tg_send, delete_message as tg_delete
 
 log = logging.getLogger(__name__)
 
@@ -257,8 +257,28 @@ def send_draft_review(lead: dict) -> None:
         ],
     ]
 
-    if _send_tg(text, buttons):
-        log.info("Gate 2 draft sent for %s (lead %s)", lead["business_name"], lead["id"])
+    # Delete old Gate 2 message if it exists (prevents duplicates)
+    old_msg_id = lead.get("gate2_message_id")
+    if old_msg_id:
+        tg_delete("OUTREACH", old_msg_id)
+        log.info("Deleted old Gate 2 message %s for %s", old_msg_id, lead["business_name"])
+
+    msg_id = _send_tg(text, buttons)
+    if msg_id:
+        # Save message_id so we can delete it later if needed
+        lead["gate2_message_id"] = msg_id
+        # Persist to queue
+        try:
+            from viper.outreach.approval_queue import _load_queue, _save_queue
+            queue = _load_queue()
+            for entry in queue:
+                if entry["id"] == lead["id"]:
+                    entry["gate2_message_id"] = msg_id
+                    break
+            _save_queue(queue)
+        except Exception:
+            pass
+        log.info("Gate 2 draft sent for %s (lead %s, msg %s)", lead["business_name"], lead["id"], msg_id)
     else:
         print(f"  [TG FALLBACK] Gate 2 draft review needed for {lead['business_name']} — lead_id: {lead['id']}")
 
