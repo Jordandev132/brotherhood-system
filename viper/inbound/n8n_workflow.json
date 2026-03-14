@@ -1,0 +1,114 @@
+{
+  "name": "Viper Inbound — Google Alerts RSS Pipeline",
+  "nodes": [
+    {
+      "id": "trigger_rss",
+      "name": "RSS Feed Trigger",
+      "type": "n8n-nodes-base.rssFeedReadTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "feedUrl": "={{ $json.feed_url }}",
+        "pollTimes": {
+          "item": [{"mode": "everyMinute", "value": 5}]
+        }
+      },
+      "notes": "One trigger per RSS feed. Duplicate this node 25 times, one per Google Alert RSS URL from rss_feeds.json."
+    },
+    {
+      "id": "merge",
+      "name": "Merge All Feeds",
+      "type": "n8n-nodes-base.merge",
+      "position": [500, 300],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "filter_intent",
+      "name": "Filter — Buyer Intent",
+      "type": "n8n-nodes-base.filter",
+      "position": [700, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.title + ' ' + ($json.contentSnippet || '') }}",
+              "operation": "regex",
+              "value2": "(?i)(need|looking for|hire|budget|who can build|help me|recommend|want to|searching for|anyone know|can someone)"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "score",
+      "name": "VIPER-Q Score",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "const text = ($input.item.json.title + ' ' + ($input.item.json.contentSnippet || '')).toLowerCase();\n\nconst BUYER_KEYWORDS = {\n  'need': 15, 'looking for': 15, 'hire': 20, 'budget': 20,\n  'who can build': 25, 'help me': 10, 'recommend': 10,\n  'want to': 10, 'searching for': 15, 'how much': 15,\n  'agency': 10, 'developer': 10, 'freelancer': 10\n};\n\nconst NICHE_KEYWORDS = {\n  'dental': 'Dental', 'dentist': 'Dental', 'hvac': 'HVAC',\n  'heating': 'HVAC', 'cooling': 'HVAC', 'lawyer': 'Legal',\n  'law firm': 'Legal', 'attorney': 'Legal', 'real estate': 'Real Estate',\n  'realtor': 'Real Estate', 'med spa': 'Med Spa', 'medspa': 'Med Spa',\n  'property management': 'Real Estate'\n};\n\nlet score = 0;\nfor (const [kw, pts] of Object.entries(BUYER_KEYWORDS)) {\n  if (text.includes(kw)) score += pts;\n}\n\nlet niche = 'General';\nfor (const [kw, label] of Object.entries(NICHE_KEYWORDS)) {\n  if (text.includes(kw)) { niche = label; break; }\n}\n\nscore = Math.min(score, 100);\n\nreturn [{\n  json: {\n    ...$input.item.json,\n    viper_score: score,\n    niche: niche,\n    is_high_intent: score >= 50\n  }\n}];"
+      }
+    },
+    {
+      "id": "filter_score",
+      "name": "Score >= 50",
+      "type": "n8n-nodes-base.filter",
+      "position": [1100, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.viper_score }}",
+              "operation": "largerEqual",
+              "value2": 50
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "telegram_alert",
+      "name": "Shelby TG Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1300, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:7777/api/webhook/viper-inbound",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "title", "value": "={{ $json.title }}"},
+            {"name": "url", "value": "={{ $json.link }}"},
+            {"name": "source", "value": "={{ $json.creator || 'Google Alert' }}"},
+            {"name": "niche", "value": "={{ $json.niche }}"},
+            {"name": "score", "value": "={{ $json.viper_score }}"},
+            {"name": "snippet", "value": "={{ ($json.contentSnippet || '').substring(0, 200) }}"}
+          ]
+        }
+      },
+      "notes": "Sends to Shelby webhook which formats the TG alert with suggested reply and BID/SKIP buttons."
+    }
+  ],
+  "connections": {
+    "trigger_rss": {"main": [["merge"]]},
+    "merge": {"main": [["filter_intent"]]},
+    "filter_intent": {"main": [["score"]]},
+    "score": {"main": [["filter_score"]]},
+    "filter_score": {"main": [["telegram_alert"]]}
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "_meta": {
+    "version": "1.0",
+    "description": "Viper Inbound Engine — monitors 25 Google Alert RSS feeds for high-intent buyer signals, scores them, and sends Telegram alerts via Shelby.",
+    "setup_notes": [
+      "1. Jordan creates 25 Google Alerts (see google_alerts_setup.md)",
+      "2. RSS URLs go into rss_feeds.json",
+      "3. Import this workflow into n8n",
+      "4. Duplicate the RSS trigger node for each of the 25 feeds",
+      "5. Connect all triggers to the merge node",
+      "6. Configure Shelby webhook endpoint"
+    ]
+  }
+}
