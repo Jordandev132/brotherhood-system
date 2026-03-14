@@ -13,12 +13,16 @@ import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+import time
+
 import requests
 
 log = logging.getLogger(__name__)
 
 _API_URL = "https://api.app.outscraper.com/maps/search-v3"
 _TIMEOUT = 30
+_POLL_INTERVAL = 3  # seconds between async result polls
+_MAX_POLLS = 10  # max 30 seconds waiting
 
 
 def _load_api_key() -> str:
@@ -88,12 +92,42 @@ def enrich_from_gbp(business_name: str, address: str = "") -> GBPData:
 
     try:
         resp = requests.get(_API_URL, params=params, headers=headers, timeout=_TIMEOUT)
-        if resp.status_code != 200:
+
+        # Handle async 202 response — poll for results
+        if resp.status_code == 202:
+            poll_data = resp.json()
+            poll_url = poll_data.get("results_location", "")
+            if not poll_url:
+                result.error = "Outscraper returned 202 but no results_location"
+                return result
+
+            log.info("[GBP] Async request for %s, polling...", business_name[:30])
+            data = None
+            for _ in range(_MAX_POLLS):
+                time.sleep(_POLL_INTERVAL)
+                poll_resp = requests.get(poll_url, headers=headers, timeout=_TIMEOUT)
+                if poll_resp.status_code == 200:
+                    poll_json = poll_resp.json()
+                    if poll_json.get("status") == "Success":
+                        data = poll_json
+                        break
+                    elif poll_json.get("status") == "Pending":
+                        continue
+                    else:
+                        result.error = f"Outscraper poll status: {poll_json.get('status')}"
+                        return result
+
+            if data is None:
+                result.error = "Outscraper async timeout — results not ready"
+                log.error("[GBP] Poll timeout for %s", business_name[:40])
+                return result
+
+        elif resp.status_code != 200:
             result.error = f"Outscraper API {resp.status_code}: {resp.text[:200]}"
             log.error("[GBP] API error for %s: %s", business_name[:40], result.error)
             return result
-
-        data = resp.json()
+        else:
+            data = resp.json()
 
         # Outscraper returns nested results
         results_list = data.get("data", [])

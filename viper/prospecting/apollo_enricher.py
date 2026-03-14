@@ -81,10 +81,10 @@ def enrich_email(
     headers = {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache",
+        "X-Api-Key": api_key,
     }
 
     payload = {
-        "api_key": api_key,
         "q_organization_domains": domain,
         "page": 1,
         "per_page": limit,

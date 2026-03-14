@@ -16,7 +16,8 @@ import requests
 
 log = logging.getLogger(__name__)
 
-_API_BASE = "https://api.instantly.ai/api/v1"
+_API_BASE_V1 = "https://api.instantly.ai/api/v1"
+_API_BASE_V2 = "https://api.instantly.ai/api/v2"
 _TIMEOUT = 15
 
 
@@ -89,7 +90,7 @@ def send_email(
         }
 
         resp = requests.post(
-            f"{_API_BASE}/lead/add",
+            f"{_API_BASE_V1}/lead/add",
             json=lead_data,
             timeout=_TIMEOUT,
         )
@@ -150,7 +151,7 @@ def add_lead_to_campaign(
     }
 
     try:
-        resp = requests.post(f"{_API_BASE}/lead/add", json=payload, timeout=_TIMEOUT)
+        resp = requests.post(f"{_API_BASE_V1}/lead/add", json=payload, timeout=_TIMEOUT)
         return resp.status_code == 200
     except Exception as e:
         log.error("Instantly add_lead failed: %s", e)
@@ -178,7 +179,7 @@ def create_campaign(
     }
 
     try:
-        resp = requests.post(f"{_API_BASE}/campaign/create", json=payload, timeout=_TIMEOUT)
+        resp = requests.post(f"{_API_BASE_V1}/campaign/create", json=payload, timeout=_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
             campaign_id = data.get("id", "")
@@ -205,7 +206,7 @@ def get_campaign_analytics(campaign_id: str = "") -> dict:
 
     try:
         resp = requests.get(
-            f"{_API_BASE}/analytics/campaign/summary",
+            f"{_API_BASE_V1}/analytics/campaign/summary",
             params={"api_key": api_key, "campaign_id": cid},
             timeout=_TIMEOUT,
         )
@@ -228,19 +229,20 @@ def check_warmup_status() -> list[dict]:
 
     try:
         resp = requests.get(
-            f"{_API_BASE}/account/list",
-            params={"api_key": api_key},
+            f"{_API_BASE_V2}/accounts",
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=_TIMEOUT,
         )
         if resp.status_code == 200:
-            accounts = resp.json()
+            data = resp.json()
+            accounts = data.get("items", [])
             statuses = []
             for acc in accounts:
                 statuses.append({
                     "email": acc.get("email", ""),
-                    "warmup_status": acc.get("warmup_status", "unknown"),
-                    "warmup_reputation": acc.get("warmup_reputation", 0),
-                    "daily_limit": acc.get("daily_limit", 0),
+                    "warmup_status": acc.get("warmup_status", 0),
+                    "warmup_score": acc.get("stat_warmup_score", 0),
+                    "status": acc.get("status", 0),
                 })
             return statuses
     except Exception as e:
