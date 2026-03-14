@@ -1,0 +1,415 @@
+<!-- LEADS PIPELINE — Real-Time Command Center -->
+<div class="tab-content" id="tab-leads">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+    <h2 style="margin:0;font-size:1.1rem;font-weight:700;">
+      Leads Pipeline
+    </h2>
+    <span class="badge badge-success">
+      <span class="status-dot online"></span> Live
+    </span>
+    <span id="leads-refresh-timer" style="font-family:var(--font-mono);font-size:0.68rem;padding:2px 10px;border-radius:var(--radius-pill);background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.15);color:var(--brand-primary,#7c3aed);font-weight:600;">Auto: 10s</span>
+    <button class="btn" onclick="leadsRefresh()" style="font-size:0.72rem;font-weight:700;border-color:var(--agent-viper);color:var(--agent-viper);margin-left:auto;">Refresh</button>
+    <span class="text-muted" style="font-size:0.68rem;">Updated: <span id="leads-updated">--</span></span>
+  </div>
+
+  <!-- ═══ TOP BAR — 5 Live Counters ═══ -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;">
+    <!-- Viper Scan Timer -->
+    <div class="glass-card" style="padding:14px;border-left:3px solid var(--agent-viper,#00ff88);">
+      <div class="text-muted" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;">Viper Scanner</div>
+      <div id="leads-scan-status" style="font-size:0.82rem;font-weight:700;font-family:var(--font-mono);color:var(--agent-viper,#00ff88);margin-top:4px;">Idle</div>
+      <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;margin-top:6px;">
+        <div id="leads-scan-bar" style="height:100%;width:0%;background:var(--agent-viper,#00ff88);border-radius:2px;transition:width 0.5s ease;"></div>
+      </div>
+    </div>
+    <!-- Gate 1 -->
+    <div class="glass-card" style="padding:14px;border-left:3px solid #f59e0b;">
+      <div class="text-muted" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;">Gate 1 Waiting</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-top:4px;">
+        <div id="leads-gate1" style="font-size:1.6rem;font-weight:800;font-family:var(--font-mono);color:#f59e0b;">0</div>
+        <span style="font-size:0.62rem;color:var(--text-muted);">need BID</span>
+      </div>
+    </div>
+    <!-- Gate 2 -->
+    <div class="glass-card" style="padding:14px;border-left:3px solid #10b981;">
+      <div class="text-muted" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;">Gate 2 Waiting</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-top:4px;">
+        <div id="leads-gate2" style="font-size:1.6rem;font-weight:800;font-family:var(--font-mono);color:#10b981;">0</div>
+        <span style="font-size:0.62rem;color:var(--text-muted);">need GO</span>
+      </div>
+    </div>
+    <!-- Emails Sent Today -->
+    <div class="glass-card" style="padding:14px;border-left:3px solid #3b82f6;">
+      <div class="text-muted" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;">Emails Sent Today</div>
+      <div id="leads-sent-today" style="font-size:1.6rem;font-weight:800;font-family:var(--font-mono);color:#3b82f6;margin-top:4px;">0</div>
+    </div>
+    <!-- Total Pipeline -->
+    <div class="glass-card" style="padding:14px;border-left:3px solid var(--brand-primary,#7c3aed);">
+      <div class="text-muted" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;">Total Pipeline</div>
+      <div id="leads-total" style="font-size:1.6rem;font-weight:800;font-family:var(--font-mono);color:var(--brand-primary,#7c3aed);margin-top:4px;">0</div>
+    </div>
+  </div>
+
+  <!-- ═══ Stage Funnel ═══ -->
+  <div class="glass-card" style="margin-bottom:16px;padding:14px 16px;">
+    <div class="text-muted" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Pipeline Funnel</div>
+    <div id="leads-funnel" style="display:flex;gap:4px;align-items:flex-end;height:48px;"></div>
+    <div id="leads-funnel-labels" style="display:flex;gap:4px;margin-top:4px;"></div>
+  </div>
+
+  <!-- ═══ Sub-tabs ═══ -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
+    <button class="viper-subtab active" data-sub="batches" onclick="leadsSwitchSub('batches')">Batch Cards</button>
+    <button class="viper-subtab" data-sub="table" onclick="leadsSwitchSub('table')">Lead Table</button>
+    <button class="viper-subtab" data-sub="sequences" onclick="leadsSwitchSub('sequences')">Sequences</button>
+  </div>
+
+  <!-- ═══ Panel: Batch Cards ═══ -->
+  <div class="leads-panel" id="leads-panel-batches">
+    <div id="leads-batches-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;"></div>
+    <div id="leads-batches-empty" style="display:none;text-align:center;padding:40px;color:var(--text-muted);font-size:0.85rem;">No batches yet. Viper is scanning...</div>
+  </div>
+
+  <!-- ═══ Panel: Lead Table ═══ -->
+  <div class="leads-panel" id="leads-panel-table" style="display:none;">
+    <!-- Filters -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+      <select id="leads-filter-niche" onchange="leadsApplyFilters()" style="background:var(--bg-card,#16213e);color:var(--text-primary,#f1f5f9);border:1px solid var(--border,#334155);border-radius:6px;padding:6px 10px;font-size:0.72rem;font-family:var(--font-ui);">
+        <option value="">All Niches</option>
+        <option value="dental">Dental</option>
+        <option value="real estate">Real Estate</option>
+        <option value="commercial real estate">Commercial RE</option>
+        <option value="hvac">HVAC</option>
+        <option value="legal">Legal</option>
+        <option value="med spa">Med Spa</option>
+      </select>
+      <select id="leads-filter-stage" onchange="leadsApplyFilters()" style="background:var(--bg-card,#16213e);color:var(--text-primary,#f1f5f9);border:1px solid var(--border,#334155);border-radius:6px;padding:6px 10px;font-size:0.72rem;font-family:var(--font-ui);">
+        <option value="">All Stages</option>
+        <option value="approved">Approved</option>
+        <option value="sent">Sent</option>
+        <option value="declined">Declined</option>
+        <option value="needs_contact_name">Needs Contact</option>
+      </select>
+      <input type="text" id="leads-filter-search" placeholder="Search business name..." oninput="leadsApplyFilters()" style="background:var(--bg-card,#16213e);color:var(--text-primary,#f1f5f9);border:1px solid var(--border,#334155);border-radius:6px;padding:6px 10px;font-size:0.72rem;font-family:var(--font-ui);flex:1;min-width:200px;">
+      <span id="leads-table-count" style="font-family:var(--font-mono);font-size:0.68rem;color:var(--text-muted);">0 leads</span>
+    </div>
+    <!-- Table -->
+    <div class="glass-card" style="overflow-x:auto;padding:0;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.72rem;">
+        <thead>
+          <tr style="background:var(--surface-elevated);text-align:left;">
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;cursor:pointer;" onclick="leadsSort('business_name')">Business</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;cursor:pointer;" onclick="leadsSort('niche')">Niche</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;cursor:pointer;" onclick="leadsSort('city')">City/State</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;cursor:pointer;" onclick="leadsSort('score')">Score</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;">Contact</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;">Email</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;cursor:pointer;" onclick="leadsSort('stage')">Stage</th>
+            <th style="padding:8px 10px;font-weight:600;color:var(--text-secondary);font-size:0.66rem;">Demo</th>
+          </tr>
+        </thead>
+        <tbody id="leads-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══ Panel: Sequences ═══ -->
+  <div class="leads-panel" id="leads-panel-sequences" style="display:none;">
+    <div id="leads-seq-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;"></div>
+    <div id="leads-seq-empty" style="display:none;text-align:center;padding:40px;color:var(--text-muted);font-size:0.85rem;">No sequences configured.</div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  var _leadsData = null;
+  var _leadsSort = {col: 'score', dir: -1};
+  var _leadsRefreshInterval = null;
+  var _leadsCountdown = 10;
+
+  // ── Sub-tab switching ──
+  window.leadsSwitchSub = function(sub) {
+    var panels = document.querySelectorAll('.leads-panel');
+    for (var i = 0; i < panels.length; i++) panels[i].style.display = 'none';
+    var el = document.getElementById('leads-panel-' + sub);
+    if (el) el.style.display = '';
+    var btns = document.querySelectorAll('#tab-leads .viper-subtab');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('active', btns[i].getAttribute('data-sub') === sub);
+    }
+  };
+
+  // ── Stage badge colors ──
+  var STAGE_COLORS = {
+    approved: {bg: 'rgba(16,185,129,0.15)', color: '#10b981'},
+    sent: {bg: 'rgba(59,130,246,0.15)', color: '#3b82f6'},
+    declined: {bg: 'rgba(239,68,68,0.15)', color: '#ef4444'},
+    needs_contact_name: {bg: 'rgba(245,158,11,0.15)', color: '#f59e0b'},
+    opened: {bg: 'rgba(124,58,237,0.15)', color: '#7c3aed'},
+    clicked: {bg: 'rgba(236,72,153,0.15)', color: '#ec4899'},
+    replied: {bg: 'rgba(16,185,129,0.3)', color: '#10b981'},
+    dead: {bg: 'rgba(239,68,68,0.3)', color: '#ef4444'},
+  };
+
+  function stageBadge(stage) {
+    var s = STAGE_COLORS[stage] || {bg: 'rgba(100,116,139,0.15)', color: '#64748b'};
+    return '<span style="padding:2px 8px;border-radius:9999px;font-size:0.62rem;font-weight:600;background:' + s.bg + ';color:' + s.color + ';">' + (stage || 'unknown').replace(/_/g, ' ') + '</span>';
+  }
+
+  function nicheBadge(niche, color) {
+    return '<span style="padding:2px 8px;border-radius:9999px;font-size:0.62rem;font-weight:600;background:' + color + '22;color:' + color + ';">' + (niche || 'unknown') + '</span>';
+  }
+
+  function scoreColor(score) {
+    if (score >= 70) return '#10b981';
+    if (score >= 50) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  // ── Main refresh ──
+  window.leadsRefresh = async function() {
+    try {
+      var resp = await fetch('/api/leads/pipeline');
+      var data = await resp.json();
+      _leadsData = data;
+      renderCounters(data.counters);
+      renderFunnel(data.stage_counts);
+      renderBatches(data.batches);
+      renderTable(data.leads);
+      renderSequences(data);
+      document.getElementById('leads-updated').textContent = new Date().toLocaleTimeString();
+      _leadsCountdown = 10;
+    } catch (e) {
+      console.error('Leads refresh failed:', e);
+    }
+  };
+
+  // ── Counters ──
+  function renderCounters(c) {
+    document.getElementById('leads-gate1').textContent = c.gate1_waiting || 0;
+    document.getElementById('leads-gate2').textContent = c.gate2_waiting || 0;
+    document.getElementById('leads-sent-today').textContent = c.sent_today || 0;
+    document.getElementById('leads-total').textContent = c.total_pipeline || 0;
+  }
+
+  // ── Funnel ──
+  function renderFunnel(stages) {
+    var order = ['approved', 'sent', 'opened', 'clicked', 'replied', 'declined', 'needs_contact_name'];
+    var maxVal = 1;
+    for (var k in stages) { if (stages[k] > maxVal) maxVal = stages[k]; }
+    var funnel = document.getElementById('leads-funnel');
+    var labels = document.getElementById('leads-funnel-labels');
+    funnel.innerHTML = '';
+    labels.innerHTML = '';
+    for (var i = 0; i < order.length; i++) {
+      var key = order[i];
+      var val = stages[key] || 0;
+      var pct = Math.max(4, (val / maxVal) * 100);
+      var sc = STAGE_COLORS[key] || {color: '#64748b'};
+      funnel.innerHTML += '<div style="flex:1;background:' + sc.color + ';border-radius:3px 3px 0 0;height:' + pct + '%;min-height:4px;transition:height 0.5s;" title="' + key + ': ' + val + '"></div>';
+      labels.innerHTML += '<div style="flex:1;text-align:center;font-size:0.56rem;color:var(--text-muted);overflow:hidden;white-space:nowrap;">' + val + '<br>' + key.replace(/_/g,' ').substring(0,8) + '</div>';
+    }
+  }
+
+  // ── Batch Cards ──
+  function renderBatches(batches) {
+    var grid = document.getElementById('leads-batches-grid');
+    var empty = document.getElementById('leads-batches-empty');
+    if (!batches || batches.length === 0) {
+      grid.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    var html = '';
+    for (var i = 0; i < batches.length; i++) {
+      var b = batches[i];
+      var total = b.sent || 1;
+      var openPct = ((b.opened || 0) / total * 100).toFixed(0);
+      var clickPct = ((b.clicked || 0) / total * 100).toFixed(0);
+      var replyPct = ((b.replied || 0) / total * 100).toFixed(0);
+      html += '<div class="glass-card" style="padding:16px;border-left:3px solid ' + b.niche_color + ';">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+      html += '<div style="font-weight:700;font-size:0.88rem;">' + b.name + '</div>';
+      html += nicheBadge(b.niche, b.niche_color);
+      html += '</div>';
+      // Stats
+      html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px;">';
+      html += '<div style="text-align:center;"><div style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;">Sent</div><div style="font-family:var(--font-mono);font-weight:700;font-size:0.9rem;">' + b.sent + '</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;">Opened</div><div style="font-family:var(--font-mono);font-weight:700;font-size:0.9rem;color:#7c3aed;">' + (b.opened||0) + '</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;">Clicked</div><div style="font-family:var(--font-mono);font-weight:700;font-size:0.9rem;color:#ec4899;">' + (b.clicked||0) + '</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;">Replied</div><div style="font-family:var(--font-mono);font-weight:700;font-size:0.9rem;color:#10b981;">' + (b.replied||0) + '</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;">No Reply</div><div style="font-family:var(--font-mono);font-weight:700;font-size:0.9rem;color:#ef4444;">' + (b.no_response||0) + '</div></div>';
+      html += '</div>';
+      // Progress bars
+      html += '<div style="display:flex;gap:4px;height:6px;">';
+      html += '<div style="flex:' + Math.max(1, b.opened||0) + ';background:#7c3aed;border-radius:3px;" title="Opened ' + openPct + '%"></div>';
+      html += '<div style="flex:' + Math.max(1, b.clicked||0) + ';background:#ec4899;border-radius:3px;" title="Clicked ' + clickPct + '%"></div>';
+      html += '<div style="flex:' + Math.max(1, b.replied||0) + ';background:#10b981;border-radius:3px;" title="Replied ' + replyPct + '%"></div>';
+      html += '<div style="flex:' + Math.max(1, b.no_response||0) + ';background:rgba(255,255,255,0.06);border-radius:3px;" title="No response"></div>';
+      html += '</div>';
+      html += '<div style="display:flex;gap:12px;margin-top:6px;font-size:0.58rem;color:var(--text-muted);">';
+      html += '<span>Open ' + openPct + '%</span><span>Click ' + clickPct + '%</span><span>Reply ' + replyPct + '%</span>';
+      html += '</div>';
+      html += '</div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  // ── Lead Table ──
+  function renderTable(leads) {
+    if (!leads) return;
+    var filtered = filterLeads(leads);
+    sortLeads(filtered);
+    var tbody = document.getElementById('leads-tbody');
+    document.getElementById('leads-table-count').textContent = filtered.length + ' leads';
+    var html = '';
+    var max = Math.min(filtered.length, 100);
+    for (var i = 0; i < max; i++) {
+      var l = filtered[i];
+      var loc = [l.city, l.state].filter(Boolean).join(', ');
+      html += '<tr style="border-bottom:1px solid rgba(51,65,85,0.5);">';
+      html += '<td style="padding:8px 10px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (l.business_name||'—') + '</td>';
+      html += '<td style="padding:8px 10px;">' + nicheBadge(l.niche, l.niche_color) + '</td>';
+      html += '<td style="padding:8px 10px;color:var(--text-secondary);font-size:0.68rem;">' + (loc||'—') + '</td>';
+      html += '<td style="padding:8px 10px;font-family:var(--font-mono);font-weight:700;color:' + scoreColor(l.score) + ';">' + (l.score||0) + '</td>';
+      html += '<td style="padding:8px 10px;font-size:0.68rem;color:var(--text-secondary);">' + (l.contact_name||'—') + '</td>';
+      html += '<td style="padding:8px 10px;font-size:0.68rem;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (l.email||'—') + '</td>';
+      html += '<td style="padding:8px 10px;">' + stageBadge(l.stage) + '</td>';
+      html += '<td style="padding:8px 10px;">' + (l.demo_url ? '<a href="' + l.demo_url + '" target="_blank" style="color:#3b82f6;font-size:0.62rem;text-decoration:none;">View</a>' : '—') + '</td>';
+      html += '</tr>';
+    }
+    if (filtered.length > 100) {
+      html += '<tr><td colspan="8" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.72rem;">Showing 100 of ' + filtered.length + ' leads</td></tr>';
+    }
+    tbody.innerHTML = html;
+  }
+
+  function filterLeads(leads) {
+    var niche = (document.getElementById('leads-filter-niche').value || '').toLowerCase();
+    var stage = document.getElementById('leads-filter-stage').value || '';
+    var search = (document.getElementById('leads-filter-search').value || '').toLowerCase();
+    return leads.filter(function(l) {
+      if (niche && (l.niche||'').toLowerCase().indexOf(niche) === -1) return false;
+      if (stage && l.stage !== stage) return false;
+      if (search && (l.business_name||'').toLowerCase().indexOf(search) === -1) return false;
+      return true;
+    });
+  }
+
+  window.leadsApplyFilters = function() {
+    if (_leadsData) renderTable(_leadsData.leads);
+  };
+
+  window.leadsSort = function(col) {
+    if (_leadsSort.col === col) {
+      _leadsSort.dir *= -1;
+    } else {
+      _leadsSort.col = col;
+      _leadsSort.dir = col === 'score' ? -1 : 1;
+    }
+    if (_leadsData) renderTable(_leadsData.leads);
+  };
+
+  function sortLeads(arr) {
+    var col = _leadsSort.col;
+    var dir = _leadsSort.dir;
+    arr.sort(function(a, b) {
+      var va = a[col] || '';
+      var vb = b[col] || '';
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+  }
+
+  // ── Sequences ──
+  function renderSequences(data) {
+    var grid = document.getElementById('leads-seq-grid');
+    var empty = document.getElementById('leads-seq-empty');
+    var count = data.sequences_count || 0;
+    var paused = data.sequences_paused || 0;
+    if (count === 0) {
+      grid.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    var html = '<div class="glass-card" style="grid-column:1/-1;padding:16px;">';
+    html += '<div style="display:flex;gap:16px;align-items:center;">';
+    html += '<div><span style="font-family:var(--font-mono);font-size:1.4rem;font-weight:800;color:var(--brand-primary,#7c3aed);">' + count + '</span><span style="font-size:0.72rem;color:var(--text-muted);margin-left:6px;">sequences configured</span></div>';
+    html += '<div><span style="font-family:var(--font-mono);font-size:1.4rem;font-weight:800;color:#f59e0b;">' + paused + '</span><span style="font-size:0.72rem;color:var(--text-muted);margin-left:6px;">paused</span></div>';
+    html += '<div><span style="font-family:var(--font-mono);font-size:1.4rem;font-weight:800;color:#10b981;">' + (count - paused) + '</span><span style="font-size:0.72rem;color:var(--text-muted);margin-left:6px;">active</span></div>';
+    html += '</div>';
+    html += '<div style="margin-top:10px;font-size:0.72rem;color:var(--text-muted);">3-step drip: Check-in (Day 3) &rarr; Value-add (Day 7) &rarr; Closing (Day 14)</div>';
+    html += '</div>';
+    grid.innerHTML = html;
+  }
+
+  // ── Scan status polling ──
+  async function pollScanStatus() {
+    try {
+      var resp = await fetch('/api/viper/scan-status');
+      var data = await resp.json();
+      var el = document.getElementById('leads-scan-status');
+      var bar = document.getElementById('leads-scan-bar');
+      if (data.scanning) {
+        el.textContent = data.step || 'Scanning...';
+        bar.style.width = (data.pct || 0) + '%';
+      } else {
+        el.textContent = 'Idle';
+        bar.style.width = '0%';
+      }
+    } catch(e) {}
+  }
+
+  // ── Auto-refresh timer ──
+  function tickLeadsTimer() {
+    _leadsCountdown--;
+    if (_leadsCountdown <= 0) {
+      leadsRefresh();
+      pollScanStatus();
+      _leadsCountdown = 10;
+    }
+    var el = document.getElementById('leads-refresh-timer');
+    if (el) el.textContent = 'Auto: ' + _leadsCountdown + 's';
+  }
+
+  // Start auto-refresh when tab becomes visible
+  var _leadsTimerInterval = null;
+  var origSwitchTab = window.switchTab;
+  if (origSwitchTab) {
+    // Patch switchTab to start/stop leads auto-refresh
+    var _patchedSwitchTab = false;
+    function ensureLeadsTimer() {
+      if (!_leadsTimerInterval) {
+        leadsRefresh();
+        pollScanStatus();
+        _leadsTimerInterval = setInterval(tickLeadsTimer, 1000);
+      }
+    }
+    function stopLeadsTimer() {
+      if (_leadsTimerInterval) {
+        clearInterval(_leadsTimerInterval);
+        _leadsTimerInterval = null;
+      }
+    }
+    // Observer: start timer when leads tab is active
+    var observer = new MutationObserver(function() {
+      var tab = document.getElementById('tab-leads');
+      if (tab && tab.classList.contains('active')) {
+        ensureLeadsTimer();
+      } else {
+        stopLeadsTimer();
+      }
+    });
+    var tabEl = document.getElementById('tab-leads');
+    if (tabEl) {
+      observer.observe(tabEl, {attributes: true, attributeFilter: ['class']});
+    }
+  }
+
+})();
+</script>

@@ -33,6 +33,7 @@ def register_all_blueprints(app: Flask) -> None:
     from bot.routes.traders import traders_bp
     from bot.routes.arbiter import arbiter_bp
     from bot.routes.finances import finances_bp
+    from bot.routes.leads import leads_bp
 
     app.register_blueprint(garves_bp)
     app.register_blueprint(soren_bp)
@@ -58,3 +59,4 @@ def register_all_blueprints(app: Flask) -> None:
     app.register_blueprint(traders_bp)
     app.register_blueprint(arbiter_bp)
     app.register_blueprint(finances_bp)
+    app.register_blueprint(leads_bp)

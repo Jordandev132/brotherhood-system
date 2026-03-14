@@ -48,6 +48,9 @@
     <button class="sidebar-btn" data-tab="thor" style="--accent:var(--agent-thor);" onclick="switchTab('thor')">Thor</button>
     <button class="sidebar-btn" data-tab="viper" style="--accent:var(--agent-viper);" onclick="switchTab('viper')">Viper</button>
 
+    <div class="sidebar-section-label">REVENUE</div>
+    <button class="sidebar-btn" data-tab="leads" style="--accent:#7c3aed;" onclick="switchTab('leads')">Leads Pipeline</button>
+
     <div class="sidebar-section-label">INFRASTRUCTURE</div>
     <button class="sidebar-btn" data-tab="intelligence" style="--accent:#9B59B6;" onclick="switchTab('intelligence')">Intelligence</button>
     <button class="sidebar-btn" data-tab="system" style="--accent:#aaaaaa;" onclick="switchTab('system')">Monitoring</button>
@@ -89,6 +92,7 @@
   {% include 'tabs/system.html' %}
   {% include 'tabs/intelligence.html' %}
   {% include 'tabs/arbiter.html' %}
+  {% include 'tabs/leads.html' %}
   <!-- Video Modal -->
   <div class="video-modal" id="video-modal">
     <div class="video-modal-inner">
