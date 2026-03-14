@@ -266,13 +266,10 @@ def mark_step_sent(sequence_id: str, step_number: int) -> bool:
         for step in seq["steps"]:
             if step["step"] == step_number:
                 step["sent_at"] = datetime.now(ET).isoformat()
-                _save(sequences)
-                log.info("Marked step %d sent for sequence %s", step_number, sequence_id)
-
-                # If last step, mark sequence complete
                 if step_number == 5:
                     seq["status"] = "completed"
-                    _save(sequences)
+                _save(sequences)
+                log.info("Marked step %d sent for sequence %s", step_number, sequence_id)
                 return True
     return False
 

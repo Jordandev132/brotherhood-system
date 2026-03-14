@@ -222,28 +222,7 @@ def capture_roi_lead(
     """Store a lead from the ROI Calculator and queue for MailerLite."""
     captures = _load_captures()
 
-    for c in captures:
-        if c.get("email", "").lower() == email.lower():
-            log.info("Duplicate ROI capture for %s — updating", email)
-            c.update({
-                "business_type": business_type,
-                "missed_calls": missed_calls,
-                "ltv": ltv,
-                "receptionist_cost": receptionist_cost,
-                "monthly_lost": monthly_lost,
-                "annual_lost": annual_lost,
-                "monthly_savings": monthly_savings,
-                "roi_days": roi_days,
-                "net_annual": net_annual,
-                "first_name": first_name,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            _save_captures(captures)
-            return c
-
-    record = {
-        "email": email,
-        "first_name": first_name,
+    fields = {
         "business_type": business_type,
         "missed_calls": missed_calls,
         "ltv": ltv,
@@ -253,6 +232,19 @@ def capture_roi_lead(
         "monthly_savings": monthly_savings,
         "roi_days": roi_days,
         "net_annual": net_annual,
+        "first_name": first_name,
+    }
+
+    for c in captures:
+        if c.get("email", "").lower() == email.lower():
+            log.info("Duplicate ROI capture for %s — updating", email)
+            c.update({**fields, "updated_at": datetime.now(timezone.utc).isoformat()})
+            _save_captures(captures)
+            return c
+
+    record = {
+        "email": email,
+        **fields,
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "mailerlite_synced": False,
         "nurture_started": False,
