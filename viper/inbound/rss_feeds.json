@@ -1,5 +1,31 @@
 {
-  "feeds": [],
-  "last_updated": null,
-  "notes": "Jordan: paste your 25 Google Alert RSS URLs here after creating them at https://www.google.com/alerts"
+  "feeds": [
+    {"id": 1, "keyword": "\"need a chatbot\" small business", "url": "https://www.google.com/alerts/feeds/14091954075148389299/3715120946355205615"},
+    {"id": 2, "keyword": "\"looking for chatbot\" dentist OR dental OR HVAC OR lawyer", "url": "https://www.google.com/alerts/feeds/14091954075148389299/3801903647499618608"},
+    {"id": 3, "keyword": "\"want to automate\" customer service small business", "url": "https://www.google.com/alerts/feeds/14091954075148389299/3111106622593610810"},
+    {"id": 4, "keyword": "\"missed calls\" dentist OR dental practice", "url": "https://www.google.com/alerts/feeds/14091954075148389299/2784623752230381361"},
+    {"id": 5, "keyword": "\"after hours\" answering service dental OR HVAC OR law firm", "url": "https://www.google.com/alerts/feeds/14091954075148389299/5776572394178181025"},
+    {"id": 6, "keyword": "\"chatbot for\" dentist OR \"dental practice\" OR \"law firm\"", "url": "https://www.google.com/alerts/feeds/14091954075148389299/4755741850848481497"},
+    {"id": 7, "keyword": "\"hire chatbot developer\" OR \"chatbot agency\"", "url": "https://www.google.com/alerts/feeds/14091954075148389299/3285180376768039742"},
+    {"id": 8, "keyword": "\"looking for AI\" automation agency", "url": "https://www.google.com/alerts/feeds/14091954075148389299/2625812336852258660"},
+    {"id": 9, "keyword": "\"losing leads\" HVAC OR plumber OR dentist", "url": "https://www.google.com/alerts/feeds/14091954075148389299/11291506077906167392"},
+    {"id": 10, "keyword": "\"no one answers the phone\" dentist OR lawyer OR contractor", "url": "https://www.google.com/alerts/feeds/14091954075148389299/6975302486250767640"},
+    {"id": 11, "keyword": "\"can't keep up with leads\" real estate OR dental", "url": "https://www.google.com/alerts/feeds/14091954075148389299/15530345649908507360"},
+    {"id": 12, "keyword": "\"dental practice\" AI automation", "url": "https://www.google.com/alerts/feeds/14091954075148389299/12428279996763213285"},
+    {"id": 13, "keyword": "\"law firm\" chatbot implementation", "url": "https://www.google.com/alerts/feeds/14091954075148389299/14671373699754919395"},
+    {"id": 14, "keyword": "\"HVAC business\" automation customer service", "url": "https://www.google.com/alerts/feeds/14091954075148389299/3308983714226391862"},
+    {"id": 15, "keyword": "\"real estate agent\" AI chatbot lead", "url": "https://www.google.com/alerts/feeds/14091954075148389299/5829378343437836508"},
+    {"id": 16, "keyword": "\"property management\" chatbot tenant communication", "url": "https://www.google.com/alerts/feeds/14091954075148389299/2155278748191663192"},
+    {"id": 17, "keyword": "\"need automation\" small business", "url": "https://www.google.com/alerts/feeds/14091954075148389299/547404331672032034"},
+    {"id": 18, "keyword": "\"chatbot developer needed\"", "url": "https://www.google.com/alerts/feeds/14091954075148389299/15964763798445174747"},
+    {"id": 19, "keyword": "\"AI for my business\" small business", "url": "https://www.google.com/alerts/feeds/14091954075148389299/13939242751604328490"},
+    {"id": 20, "keyword": "\"appointment scheduling bot\" OR \"booking automation\"", "url": "https://www.google.com/alerts/feeds/14091954075148389299/7038115367554296361"},
+    {"id": 21, "keyword": "\"patient scheduling\" automation dental", "url": "https://www.google.com/alerts/feeds/14091954075148389299/5111789722006170529"},
+    {"id": 22, "keyword": "\"client intake\" automation law firm", "url": "https://www.google.com/alerts/feeds/14091954075148389299/11040331418364786469"},
+    {"id": 23, "keyword": "\"after hours\" leads real estate", "url": "https://www.google.com/alerts/feeds/14091954075148389299/143826110230474329"},
+    {"id": 24, "keyword": "\"virtual receptionist\" dentist OR HVAC OR lawyer", "url": "https://www.google.com/alerts/feeds/14091954075148389299/11975215115527059078"},
+    {"id": 25, "keyword": "\"answering service replacement\" AI OR chatbot", "url": "https://www.google.com/alerts/feeds/14091954075148389299/12496149681880933676"}
+  ],
+  "last_updated": "2026-03-14T19:05:00-05:00",
+  "total": 25
 }
