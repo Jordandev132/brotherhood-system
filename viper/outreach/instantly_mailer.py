@@ -178,7 +178,19 @@ def create_campaign(
     if not api_key:
         return ""
 
-    payload = {"name": name}
+    payload = {
+        "name": name,
+        "campaign_schedule": {
+            "schedules": [
+                {
+                    "name": schedule.get("name", "Weekdays") if schedule else "Weekdays",
+                    "days": schedule.get("days", {"1": True, "2": True, "3": True, "4": True, "5": True, "6": False, "0": False}) if schedule else {"1": True, "2": True, "3": True, "4": True, "5": True, "6": False, "0": False},
+                    "timezone": schedule.get("timezone", "America/Chicago") if schedule else "America/Chicago",
+                    "timing": schedule.get("timing", {"from": "08:00", "to": "17:00"}) if schedule else {"from": "08:00", "to": "17:00"},
+                }
+            ]
+        },
+    }
 
     try:
         resp = requests.post(
