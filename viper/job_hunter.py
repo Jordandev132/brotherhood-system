@@ -767,6 +767,7 @@ def run_loop(interval_minutes: int = 30) -> None:
     """Run scanner in a loop with configurable interval."""
     from viper.drip_runner import run_drip_cycle
     from viper.inbound.rss_poller import poll_all_feeds
+    from viper.inbound.reddit_monitor import poll_reddit
 
     log.info("[JOB_HUNTER] Starting loop (interval=%d min)", interval_minutes)
     while True:
@@ -790,5 +791,13 @@ def run_loop(interval_minutes: int = 30) -> None:
                 log.info("[JOB_HUNTER] Inbound: %d hot, %d warm leads", inbound["hot"], inbound["warm"])
         except Exception as e:
             log.exception("[JOB_HUNTER] Inbound poll error: %s", str(e)[:200])
+
+        # Poll Reddit for buyer-intent posts
+        try:
+            reddit_stats = poll_reddit()
+            if reddit_stats.get("matches", 0):
+                log.info("[JOB_HUNTER] Reddit: %d matches, %d alerts", reddit_stats["matches"], reddit_stats["alerts"])
+        except Exception as e:
+            log.exception("[JOB_HUNTER] Reddit poll error: %s", str(e)[:200])
 
         time.sleep(interval_minutes * 60)
