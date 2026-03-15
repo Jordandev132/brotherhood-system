@@ -782,4 +782,13 @@ def run_loop(interval_minutes: int = 30) -> None:
         except Exception as e:
             log.exception("[JOB_HUNTER] Drip cycle error: %s", str(e)[:200])
 
+        # Poll inbound RSS feeds (Google Alerts)
+        try:
+            from viper.inbound.rss_poller import poll_all_feeds
+            inbound = poll_all_feeds()
+            if inbound.get("hot", 0) or inbound.get("warm", 0):
+                log.info("[JOB_HUNTER] Inbound: %d hot, %d warm leads", inbound["hot"], inbound["warm"])
+        except Exception as e:
+            log.exception("[JOB_HUNTER] Inbound poll error: %s", str(e)[:200])
+
         time.sleep(interval_minutes * 60)
