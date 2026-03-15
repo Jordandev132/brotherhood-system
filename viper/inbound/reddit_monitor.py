@@ -154,6 +154,7 @@ def _save_seen(seen: set) -> None:
 
 
 def _log_lead(post: dict, matched: list[str], score: int, classification: str) -> None:
+    niche, _ = vq_detect_niche(post.get("title", "") + " " + post.get("body", ""))
     record = {
         "ts": datetime.now(_TZ_ET).isoformat(),
         "title": post.get("title", ""),
@@ -163,26 +164,11 @@ def _log_lead(post: dict, matched: list[str], score: int, classification: str) -
         "author": post.get("author", ""),
         "score": score,
         "classification": classification,
-        "niche": _detect_niche(post.get("title", "") + " " + post.get("body", "")),
+        "niche": niche,
         "signals": matched,
     }
     with open(_INBOUND_LOG, "a") as f:
         f.write(json.dumps(record) + "\n")
-
-
-def _detect_niche(text: str) -> str:
-    lower = text.lower()
-    if any(w in lower for w in ["dentist", "dental", "patient", "practice"]):
-        return "dental"
-    if any(w in lower for w in ["real estate", "realtor", "listing", "showing"]):
-        return "real_estate"
-    if any(w in lower for w in ["hvac", "heating", "cooling", "plumb"]):
-        return "hvac"
-    if any(w in lower for w in ["lawyer", "law firm", "attorney", "legal"]):
-        return "legal"
-    if any(w in lower for w in ["med spa", "medspa", "aestheti"]):
-        return "med_spa"
-    return "general"
 
 
 # ── TG Alert ────────────────────────────────────────────────────────
@@ -193,7 +179,7 @@ def _send_alert(post: dict, matched: list[str], score: int) -> None:
     except ImportError:
         return
 
-    niche = _detect_niche(post.get("title", "") + " " + post.get("body", ""))
+    niche, _ = vq_detect_niche(post.get("title", "") + " " + post.get("body", ""))
     text = (
         f"🔥 <b>Viper Inbound — Reddit</b>\n\n"
         f"Sub: r/{post.get('subreddit', '?')}\n"
@@ -235,6 +221,10 @@ def poll_reddit() -> dict:
             except Exception:
                 sub_results[sub] = []
 
+    # Industry subs get scored directly by VIPER-Q (subreddit itself signals intent)
+    # Business/AI subs need the intent keyword gate first (too noisy otherwise)
+    industry_set = set(INDUSTRY_SUBS)
+
     for sub, posts in sub_results.items():
         stats["subs_polled"] += 1
 
@@ -246,25 +236,31 @@ def poll_reddit() -> dict:
             seen.add(post_id)
             stats["new_posts"] += 1
 
-            is_match, matched = _has_buyer_intent(
-                post.get("title", ""),
-                post.get("body", ""),
-            )
+            title = post.get("title", "")
+            body = post.get("body", "")
 
-            if is_match:
-                stats["matches"] += 1
-                # Use unified VIPER-Q scoring
-                result = viper_q_score(
-                    post.get("title", ""),
-                    post.get("body", ""),
-                    metadata={"num_comments": post.get("num_comments", 0)},
-                )
-                if result["score"] >= 50:
-                    _log_lead(post, matched, result["score"], result["classification"])
-                    _send_alert(post, matched, result["score"])
-                    stats["alerts"] += 1
-                else:
-                    _log_lead(post, matched, result["score"], result["classification"])
+            # Industry subs: skip intent gate, let VIPER-Q decide
+            # Business/AI subs: pre-filter with intent keywords
+            if sub in industry_set:
+                is_match, matched = True, []
+            else:
+                is_match, matched = _has_buyer_intent(title, body)
+
+            if not is_match:
+                continue
+
+            # Score with unified VIPER-Q
+            result = viper_q_score(
+                title, body,
+                metadata={"num_comments": post.get("num_comments", 0)},
+            )
+            stats["matches"] += 1
+
+            _log_lead(post, matched + result.get("signals", [])[:3], result["score"], result["classification"])
+
+            if result["score"] >= 50:
+                _send_alert(post, matched + result.get("signals", [])[:3], result["score"])
+                stats["alerts"] += 1
 
     _save_seen(seen)
 
