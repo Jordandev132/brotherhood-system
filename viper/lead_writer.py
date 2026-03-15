@@ -49,7 +49,18 @@ WEIGHTS = {
     "client": 0.10,
 }
 
-COMPOSITE_THRESHOLD = 7.0  # Only surface leads >= 7.0 to Jordan
+COMPOSITE_THRESHOLD = 5.0  # Lowered from 7.0 — let more leads through for Jordan to review
+
+# Source-type adjustments: project-based sources get bonus, job boards get penalty
+SOURCE_ADJUSTMENTS = {
+    "Reddit": 1.5,
+    "HackerNews": 1.0,
+    "GoogleAlerts": 1.0,
+    "n8n_community": 1.0,
+    "Make_community": 1.0,
+    "RemoteOK": -2.0,
+    "WeWorkRemotely": -2.0,
+}
 MAX_LEADS_KEPT = 50
 
 
@@ -140,7 +151,14 @@ def _score_dimensions(job: dict) -> dict:
 
     # Composite
     composite = round(sum(scores[k] * WEIGHTS[k] for k in WEIGHTS), 1)
+
+    # Apply source-type adjustment
+    source_adj = SOURCE_ADJUSTMENTS.get(source, 0)
+    composite = round(composite + source_adj, 1)
+    composite = max(0, min(10, composite))
+
     scores["composite"] = composite
+    scores["source_adjustment"] = source_adj
 
     return scores
 
