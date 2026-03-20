@@ -17,7 +17,7 @@ from flask import Blueprint, Response, jsonify, request
 from bot.routes._utils import read_fresh
 
 # Add shelby to path for core.tasks imports
-_SHELBY_DIR = Path("/Users/abdallaalhamdan/shelby")
+_SHELBY_DIR = Path.home() / "shelby"
 if str(_SHELBY_DIR) not in sys.path:
     sys.path.insert(0, str(_SHELBY_DIR))
 
