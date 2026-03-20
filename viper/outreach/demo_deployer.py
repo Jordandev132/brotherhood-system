@@ -7,6 +7,7 @@ Called after demo_builder generates the HTML.
 """
 from __future__ import annotations
 
+import fcntl
 import logging
 import re
 import shutil
@@ -23,8 +24,13 @@ REPO_URL = "https://github.com/DarkCode-AI/chatbot-demos.git"
 DEMO_BASE_URL = "https://darkcode-ai.github.io/chatbot-demos/"
 
 # Max retries for deployment verification
-_DEPLOY_RETRIES = 6
-_DEPLOY_WAIT = 15  # seconds between retries
+_DEPLOY_RETRIES = 12
+_DEPLOY_WAIT = 20  # seconds between retries
+
+# Exclusive file lock — serializes all git operations across threads/processes
+_GIT_LOCK_FILE = Path("/tmp/chatbot-demos-git.lock")
+_MIN_PUSH_INTERVAL = 90  # seconds between pushes (GitHub Pages cooldown)
+_PUSH_TS_FILE = REPO_DIR.parent / ".chatbot-demos-push-ts"
 
 
 def _make_slug(business_name: str) -> str:
@@ -43,17 +49,20 @@ def _make_slug(business_name: str) -> str:
 
 
 def _ensure_repo() -> bool:
-    """Ensure the chatbot-demos repo is cloned and up to date."""
+    """Ensure the chatbot-demos repo is cloned and up to date. MUST be called inside git lock."""
     if REPO_DIR.exists():
         try:
             subprocess.run(
-                ["git", "pull", "origin", "main"],
+                ["git", "pull", "--rebase", "origin", "main"],
                 cwd=REPO_DIR, capture_output=True, timeout=30, check=True,
             )
             return True
         except subprocess.CalledProcessError as e:
             log.error("[DEPLOYER] git pull failed: %s", e.stderr)
-            return False
+            # Hard reset to remote
+            subprocess.run(["git", "checkout", "main"], cwd=REPO_DIR, capture_output=True, timeout=10)
+            subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=REPO_DIR, capture_output=True, timeout=10)
+            return True
     else:
         try:
             subprocess.run(
@@ -89,21 +98,66 @@ def _copy_videos(demo_dir: Path, niche: str) -> None:
                 log.info("[DEPLOYER] Copied video %s", vid.name)
 
 
+def _wait_for_push_window() -> None:
+    """Wait until enough time has passed since the last push (GitHub Pages cooldown)."""
+    if _PUSH_TS_FILE.exists():
+        try:
+            last_push = float(_PUSH_TS_FILE.read_text().strip())
+            elapsed = time.time() - last_push
+            if elapsed < _MIN_PUSH_INTERVAL:
+                wait = _MIN_PUSH_INTERVAL - elapsed
+                log.info("[DEPLOYER] Waiting %.0fs for GitHub Pages cooldown", wait)
+                time.sleep(wait)
+        except (ValueError, OSError):
+            pass
+
+
+def _record_push() -> None:
+    """Record the timestamp of this push."""
+    try:
+        _PUSH_TS_FILE.write_text(str(time.time()))
+    except OSError:
+        pass
+
+
 def _git_commit_push(demo_dir: Path, business_name: str) -> bool:
-    """Stage, commit, and push the new demo."""
+    """Stage, commit, and push. MUST be called inside git lock."""
     try:
         subprocess.run(
             ["git", "add", str(demo_dir)],
             cwd=REPO_DIR, capture_output=True, timeout=15, check=True,
         )
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_DIR, capture_output=True, timeout=10,
+        )
+        if not result.stdout.strip():
+            log.info("[DEPLOYER] No changes to commit for %s (already deployed)", business_name)
+            return True
+
         subprocess.run(
             ["git", "commit", "-m", f"Add custom demo: {business_name}"],
             cwd=REPO_DIR, capture_output=True, timeout=15, check=True,
         )
-        subprocess.run(
+        _wait_for_push_window()
+        push_result = subprocess.run(
             ["git", "push", "origin", "main"],
-            cwd=REPO_DIR, capture_output=True, timeout=30, check=True,
+            cwd=REPO_DIR, capture_output=True, timeout=30,
         )
+        if push_result.returncode != 0:
+            # Retry once: pull --rebase then push again
+            log.warning("[DEPLOYER] Push failed for %s, retrying after rebase: %s",
+                        business_name, push_result.stderr[:200])
+            subprocess.run(
+                ["git", "pull", "--rebase", "origin", "main"],
+                cwd=REPO_DIR, capture_output=True, timeout=30, check=True,
+            )
+            subprocess.run(
+                ["git", "push", "origin", "main"],
+                cwd=REPO_DIR, capture_output=True, timeout=30, check=True,
+            )
+
+        _record_push()
         return True
     except subprocess.CalledProcessError as e:
         log.error("[DEPLOYER] git commit/push failed: %s", e.stderr)
@@ -135,13 +189,8 @@ def deploy_demo(
 ) -> tuple[str, bool]:
     """Deploy a custom demo to GitHub Pages.
 
-    1. Ensure repo is cloned/pulled
-    2. Create folder with business slug
-    3. Write index.html
-    4. Copy video files from generic template
-    5. Git add, commit, push
-    6. Wait for GitHub Pages deployment
-    7. Verify with HEAD request
+    Uses an exclusive file lock to serialize all git operations across threads.
+    This prevents the concurrent-push race condition that causes 'cannot lock ref' errors.
 
     Returns:
         (demo_url, success) tuple.
@@ -153,33 +202,37 @@ def deploy_demo(
 
     demo_url = f"{DEMO_BASE_URL}{slug}/"
 
-    # 1. Ensure repo
-    if not _ensure_repo():
-        return "", False
+    # Acquire exclusive lock — only one thread/process does git ops at a time
+    _GIT_LOCK_FILE.touch(exist_ok=True)
+    with open(_GIT_LOCK_FILE, "r+") as lock_fd:
+        log.info("[DEPLOYER] Acquiring git lock for %s...", business_name)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        log.info("[DEPLOYER] Got git lock for %s", business_name)
+        try:
+            # 1. Pull latest
+            if not _ensure_repo():
+                return "", False
 
-    # 2. Check if demo already exists
-    demo_dir = REPO_DIR / slug
-    if demo_dir.exists() and (demo_dir / "index.html").exists():
-        log.info("[DEPLOYER] Demo already exists at %s — updating", slug)
+            # 2. Write HTML (after pulling so no conflicts)
+            demo_dir = REPO_DIR / slug
+            demo_dir.mkdir(exist_ok=True)
+            (demo_dir / "index.html").write_text(html, encoding="utf-8")
+            log.info("[DEPLOYER] Wrote index.html to %s", demo_dir)
 
-    # 3. Create directory and write HTML
-    demo_dir.mkdir(exist_ok=True)
-    (demo_dir / "index.html").write_text(html, encoding="utf-8")
-    log.info("[DEPLOYER] Wrote index.html to %s", demo_dir)
+            # 3. Copy videos
+            _copy_videos(demo_dir, niche)
 
-    # 4. Copy video files
-    _copy_videos(demo_dir, niche)
+            # 4. Commit and push
+            if not _git_commit_push(demo_dir, business_name):
+                return "", False
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            log.info("[DEPLOYER] Released git lock for %s", business_name)
 
-    # 5. Commit and push
-    if not _git_commit_push(demo_dir, business_name):
-        return "", False
-
-    # 6. Verify deployment
+    # 5. Verify deployment (outside lock — just waiting for GitHub Pages)
     success = _verify_deployment(demo_url)
     if not success:
-        log.warning("[DEPLOYER] Deployment verification timed out for %s — "
-                    "URL may still become available shortly", demo_url)
-        # Return the URL anyway — it will likely deploy within minutes
+        log.warning("[DEPLOYER] Deployment verification timed out for %s — "                    "URL may still become available shortly", business_name)
         return demo_url, True
 
     return demo_url, True
