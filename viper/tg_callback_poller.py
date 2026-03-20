@@ -85,6 +85,12 @@ def _handle_callback(bot_token: str, update: dict) -> None:
     elif data.startswith("outreach_skip:"):
         lead_id = data.replace("outreach_skip:", "")
         _handle_outreach_skip(bot_token, cb_id, chat_id, message_id, original_text, lead_id)
+    elif data.startswith("outreach_batch_go:"):
+        niche_key = data.replace("outreach_batch_go:", "")
+        _handle_batch_go(bot_token, cb_id, chat_id, message_id, original_text, niche_key)
+    elif data.startswith("outreach_batch_skip:"):
+        niche_key = data.replace("outreach_batch_skip:", "")
+        _handle_batch_skip(bot_token, cb_id, chat_id, message_id, original_text, niche_key)
     elif data.startswith("drip_send:"):
         step_id = data.replace("drip_send:", "")
         _handle_drip_send(bot_token, cb_id, chat_id, message_id, original_text, step_id)
@@ -379,6 +385,95 @@ def _handle_outreach_skip(bot_token, cb_id, chat_id, message_id, original_text, 
     except Exception as e:
         log.error("Gate 2 SKIP failed for %s: %s", lead_id, e)
         _answer_callback(bot_token, cb_id, f"Error: {e}")
+
+
+def _handle_batch_go(bot_token, cb_id, chat_id, message_id, original_text, niche_key):
+    """Batch Gate 2: Send ALL emails for a niche in one tap."""
+    try:
+        from viper.outreach.approval_queue import _load_queue, _save_queue
+        from viper.outreach.outreach_engine import send_approved_email
+        import time
+
+        queue = _load_queue()
+        targets = [
+            l for l in queue
+            if l.get("status") == "lead_approved"
+            and l.get("demo_is_custom", False)
+            and _normalize_niche(l.get("niche", "")) == niche_key
+            and l.get("email")
+        ]
+
+        _answer_callback(bot_token, cb_id, f"Sending {len(targets)} emails...")
+        _edit_message(bot_token, chat_id, message_id,
+                      original_text + f"\n\n⏳ Sending {len(targets)} emails...")
+
+        sent = 0
+        failed = 0
+        for lead in targets:
+            try:
+                result = send_approved_email(lead)
+                if result["success"]:
+                    sent += 1
+                else:
+                    failed += 1
+                    log.warning("[BATCH_GO] Failed for %s: %s", lead.get("business_name"), result.get("error"))
+            except Exception as e:
+                failed += 1
+                log.error("[BATCH_GO] Exception for %s: %s", lead.get("business_name"), e)
+            time.sleep(0.3)  # avoid rate limits
+
+        _edit_message(bot_token, chat_id, message_id,
+                      original_text + f"\n\n✅ SENT: {sent} | ❌ FAILED: {failed}")
+        log.info("[BATCH_GO] niche=%s sent=%d failed=%d", niche_key, sent, failed)
+
+    except Exception as e:
+        log.error("[BATCH_GO] failed for niche %s: %s", niche_key, e)
+        _answer_callback(bot_token, cb_id, f"Error: {e}")
+
+
+def _handle_batch_skip(bot_token, cb_id, chat_id, message_id, original_text, niche_key):
+    """Batch Gate 2: Skip (decline) all leads for a niche."""
+    try:
+        from viper.outreach.approval_queue import _load_queue, _save_queue
+
+        queue = _load_queue()
+        count = 0
+        for lead in queue:
+            if (lead.get("status") == "lead_approved"
+                    and _normalize_niche(lead.get("niche", "")) == niche_key):
+                lead["status"] = "declined"
+                count += 1
+        _save_queue(queue)
+
+        _answer_callback(bot_token, cb_id, f"Skipped {count} {niche_key} leads")
+        _edit_message(bot_token, chat_id, message_id,
+                      original_text + f"\n\nSKIPPED {count} leads")
+        log.info("[BATCH_SKIP] niche=%s count=%d", niche_key, count)
+
+    except Exception as e:
+        log.error("[BATCH_SKIP] failed for niche %s: %s", niche_key, e)
+        _answer_callback(bot_token, cb_id, f"Error: {e}")
+
+
+def _normalize_niche(niche: str) -> str:
+    """Normalize niche string to a stable key for batch callbacks."""
+    n = niche.lower().strip()
+    if "dental" in n:
+        return "dental"
+    if "hvac" in n or "heating" in n or "cooling" in n:
+        return "hvac"
+    if "med" in n and "spa" in n:
+        return "medspa"
+    if "medical spa" in n:
+        return "medspa"
+    if "injury" in n or "lawyer" in n or "legal" in n or "attorney" in n:
+        return "legal"
+    if "commercial" in n and ("real" in n or "estate" in n):
+        return "commercial_re"
+    if "real estate" in n or "real_estate" in n or "realtor" in n or "realty" in n:
+        return "realestate"
+    return n.replace(" ", "_")
+
 
 
 # ── TG API helpers ──────────────────────────────────────────────────
