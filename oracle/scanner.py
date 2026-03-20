@@ -284,7 +284,7 @@ def scan_kalshi_crypto_markets(cfg: OracleConfig) -> list[WeeklyMarket]:
         return []
 
     try:
-        from hawk.kalshi import _fetch_all_markets, _get_kalshi_price
+        raise ImportError("hawk.kalshi removed — Hawk KILLED")
     except ImportError:
         log.warning("[KALSHI] hawk.kalshi not available for Oracle scanning")
         return []

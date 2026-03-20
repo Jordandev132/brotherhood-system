@@ -206,8 +206,6 @@ def api_atlas_robotox():
 def api_atlas_hawk():
     """Atlas analysis of Hawk — scanning, edge, positions."""
     try:
-        status = read_fresh(DATA_DIR / "hawk_status.json", "~/polymarket-bot/data/hawk_status.json")
-        opps = read_fresh(DATA_DIR / "hawk_opportunities.json", "~/polymarket-bot/data/hawk_opportunities.json")
         scan = status.get("scan", {})
         overview = {
             "running": status.get("running", False),
@@ -284,11 +282,6 @@ def api_atlas_viper():
 def api_atlas_odin():
     """Atlas analysis of Odin — futures trading, regime, skills."""
     try:
-        odin_root = Path.home() / "odin" / "data"
-        status = read_fresh(odin_root / "odin_status.json", "~/odin/data/odin_status.json")
-        config = status.get("config", {})
-        regime = status.get("regime", {})
-        overview = {
             "exchange": config.get("exchange", "Hyperliquid"),
             "mode": status.get("mode", "paper").upper(),
             "skills_loaded": status.get("skill_count", 0),
@@ -1517,7 +1510,7 @@ def api_atlas_suggest_agent():
                 pass
 
         # Current system gaps that might warrant a new agent
-        current_agents = ["garves", "soren", "shelby", "atlas", "lisa", "thor", "robotox", "hawk", "viper", "quant", "odin"]
+        current_agents = ["garves", "soren", "shelby", "atlas", "lisa", "thor", "robotox", "viper", "quant", ]
         gap_areas = [
             {"area": "Analytics/BI", "description": "Dedicated data visualization and business intelligence agent",
              "need": "medium", "reason": "Currently Atlas handles both research and analytics — a dedicated BI agent could provide richer dashboards and trend analysis"},
@@ -1547,7 +1540,7 @@ def api_atlas_suggest_agent():
 
 import time as _time
 
-_AGENTS_ALL = ["garves", "hawk", "odin", "soren", "lisa", "shelby", "thor", "robotox", "viper", "quant", "oracle"]
+_AGENTS_ALL = ["garves", "soren", "lisa", "shelby", "thor", "robotox", "viper", "quant", "oracle"]
 
 
 def _read_json(path: Path) -> dict | list | None:

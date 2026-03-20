@@ -108,9 +108,9 @@ def llm_memory_all():
     """Memory stats for all agents."""
     all_stats = {}
     agents = [
-        "shelby", "atlas", "lisa", "hawk", "soren",
+        "shelby", "atlas", "lisa", "soren",
         "garves", "quant", "viper", "robotox", "thor",
-        "odin",
+        ,
     ]
     try:
         sys.path.insert(0, str(SHARED_DIR))
@@ -179,7 +179,7 @@ def llm_brain_activity():
     activity = {}
     cutoff = time.time() - 300  # last 5 min
     agents_list = [
-        "shelby", "atlas", "lisa", "hawk", "soren",
+        "shelby", "atlas", "lisa", "soren",
         "garves", "quant", "viper", "robotox", "thor",
     ]
     for a in agents_list:
@@ -216,7 +216,7 @@ def llm_pattern_feed():
     """Recent learned patterns across all agents — for the learnings feed."""
     all_patterns = []
     agents_list = [
-        "shelby", "atlas", "lisa", "hawk", "soren",
+        "shelby", "atlas", "lisa", "soren",
         "garves", "quant", "viper", "robotox", "thor",
     ]
     try:
@@ -292,7 +292,7 @@ def llm_prune_patterns():
     """Prune low-confidence patterns (< 0.3) across all agents."""
     pruned = {}
     agents_list = [
-        "shelby", "atlas", "lisa", "hawk", "soren",
+        "shelby", "atlas", "lisa", "soren",
         "garves", "quant", "viper", "robotox", "thor",
     ]
     try:
@@ -394,7 +394,7 @@ def llm_export_learnings():
     """Export all patterns and high-value decisions to a JSON summary."""
     export = {"exported_at": time.strftime("%Y-%m-%d %H:%M:%S"), "agents": {}}
     agents_list = [
-        "shelby", "atlas", "lisa", "hawk", "soren",
+        "shelby", "atlas", "lisa", "soren",
         "garves", "quant", "viper", "robotox", "thor",
     ]
     try:
@@ -442,7 +442,7 @@ def llm_reset_agent_memory():
         return jsonify({"error": "agent parameter required"}), 400
 
     allowed = [
-        "shelby", "atlas", "lisa", "hawk", "soren",
+        "shelby", "atlas", "lisa", "soren",
         "garves", "quant", "viper", "robotox", "thor",
     ]
     if agent not in allowed:

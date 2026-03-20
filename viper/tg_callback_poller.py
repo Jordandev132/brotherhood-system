@@ -48,8 +48,8 @@ def _find_lead_by_hash(lead_hash: str) -> dict | None:
         for lead in data.get("leads", []):
             if lead.get("hash", "").startswith(lead_hash):
                 return lead
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("[TG_CALLBACK] _find_lead_by_hash failed: %s", str(e)[:100])
     return None
 
 
@@ -276,8 +276,8 @@ def _build_demo_and_review(bot_token: str, lead: dict) -> None:
         try:
             from viper.outreach.outreach_engine import _send_tg
             _send_tg(f"DEMO BUILD ERROR for {biz}: {e}\nLead {lead_id} needs manual attention.")
-        except Exception:
-            pass
+        except Exception as e2:
+            log.warning("[TG_CALLBACK] Failed to send TG error alert: %s", str(e2)[:100])
 
 
 def _handle_outreach_no(bot_token, cb_id, chat_id, message_id, original_text, lead_id):
@@ -486,8 +486,8 @@ def _answer_callback(bot_token: str, cb_id: str, text: str) -> None:
             json={"callback_query_id": cb_id, "text": text},
             timeout=5,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("[TG_CALLBACK] answerCallbackQuery failed: %s", str(e)[:100])
 
 
 def _edit_message(bot_token: str, chat_id: int, message_id: int, text: str) -> None:
@@ -502,8 +502,8 @@ def _edit_message(bot_token: str, chat_id: int, message_id: int, text: str) -> N
             },
             timeout=5,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("[TG_CALLBACK] editMessageText failed: %s", str(e)[:100])
 
 
 def _delete_message(bot_token: str, chat_id: int, message_id: int) -> None:
@@ -514,8 +514,8 @@ def _delete_message(bot_token: str, chat_id: int, message_id: int) -> None:
             json={"chat_id": chat_id, "message_id": message_id},
             timeout=5,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("[TG_CALLBACK] deleteMessage failed: %s", str(e)[:100])
 
 
 def _send_gate1_stats(bot_token: str, chat_id: int, action: str, lead: dict) -> None:

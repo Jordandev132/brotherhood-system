@@ -21,7 +21,7 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 DATA_DIR = Path.home() / "polymarket-bot" / "data"
-ODIN_DIR = Path.home() / "odin" / "data"
+# ODIN_DIR removed — Odin KILLED Mar 14 2026
 
 
 def gather_agent_signals() -> dict[str, Any]:
@@ -32,17 +32,14 @@ def gather_agent_signals() -> dict[str, Any]:
     signals["garves"] = _read_garves()
 
     # Hawk — non-crypto Polymarket scanner
-    signals["hawk"] = _read_hawk()
 
     # Odin — BTC/ETH futures swing trader
-    signals["odin"] = _read_odin()
 
     # Atlas — research engine
     signals["atlas"] = _read_atlas()
 
     # Cross-agent memory (enhanced swarm intelligence)
     signals["garves_memory"] = _read_garves_memory()
-    signals["odin_memory"] = _read_odin_memory()
     signals["recent_events"] = _read_recent_bus_events()
 
     # Momentum Capture Mode (Garves writes, all agents read)
@@ -75,50 +72,6 @@ def _read_garves() -> str:
     return f"regime={regime_name} FnG={fng} WR={win_rate:.0f}% ({trades} trades)"
 
 
-def _read_hawk() -> str:
-    """Hawk's view: any correlated market insights."""
-    status = _read_json(DATA_DIR / "hawk_status.json")
-    if not status:
-        return "offline"
-
-    scan = status.get("last_scan", {})
-    opportunities = scan.get("opportunities_found", 0)
-    win_rate = status.get("win_rate", 0)
-
-    return f"opportunities={opportunities} WR={win_rate:.1f}%"
-
-
-def _read_odin() -> str:
-    """Odin's view: BTC/ETH derivatives regime, funding, structure."""
-    status = _read_json(ODIN_DIR / "odin_status.json")
-    if not status:
-        return "offline"
-
-    regime = status.get("regime", {})
-    if isinstance(regime, dict):
-        regime_name = regime.get("current", regime.get("regime", "unknown"))
-        confidence = regime.get("confidence", regime.get("global_score", 0))
-    else:
-        regime_name = str(regime)
-        confidence = 0
-
-    opps = status.get("opportunities", [])
-    btc_bias = "neutral"
-    eth_bias = "neutral"
-    if isinstance(opps, list):
-        for o in opps:
-            sym = (o.get("symbol") or "").upper()
-            if "BTC" in sym:
-                btc_bias = o.get("direction", "neutral").lower()
-            elif "ETH" in sym:
-                eth_bias = o.get("direction", "neutral").lower()
-    elif isinstance(opps, dict):
-        btc_bias = opps.get("btc_bias", "neutral")
-        eth_bias = opps.get("eth_bias", "neutral")
-
-    return f"regime={regime_name} conf={confidence:.0f}% BTC={btc_bias} ETH={eth_bias}"
-
-
 def _read_atlas() -> str:
     """Atlas's macro intelligence summary."""
     atlas_dir = Path.home() / "atlas" / "data"
@@ -139,24 +92,6 @@ def _read_garves_memory() -> str:
         return "memory_unavailable"
     try:
         mem = AgentMemory("garves")
-        patterns = mem.get_active_patterns(min_confidence=0.5, limit=5)
-        mem.close()
-        if not patterns:
-            return "no_patterns"
-        summaries = []
-        for p in patterns:
-            summaries.append(f"{p.get('pattern', '')} (conf={p.get('confidence', 0):.0%})")
-        return "; ".join(summaries)
-    except Exception:
-        return "memory_error"
-
-
-def _read_odin_memory() -> str:
-    """Query Odin's AgentMemory for regime patterns and derivatives intel."""
-    if AgentMemory is None:
-        return "memory_unavailable"
-    try:
-        mem = AgentMemory("odin")
         patterns = mem.get_active_patterns(min_confidence=0.5, limit=5)
         mem.close()
         if not patterns:

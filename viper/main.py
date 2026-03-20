@@ -196,8 +196,8 @@ class TradingBot:
                 "trading", "signals", "conviction_engine",
                 "straddle", "multi_asset", "multi_timeframe",
             ])
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("[GARVES] AgentHub init failed: %s", str(e)[:100])
         # Agent Brain — learning memory + LLM reasoning
         self._brain = None
         self._shared_llm_call = None
@@ -209,8 +209,8 @@ class TradingBot:
             from llm_client import llm_call as _garves_llm
             self._brain = AgentBrain("garves", system_prompt="You are Garves V2, The Directional Sniper. You trade probabilities on Polymarket crypto up-or-down markets. You measure everything, trade less but better, and never assume bad luck.", task_type="analysis")
             self._shared_llm_call = _garves_llm
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("[GARVES] AgentBrain init failed: %s", str(e)[:100])
         self._trade_journal_counter = 0  # Counts resolved trades for LLM analysis trigger
         self._tick_counter = 0  # For periodic cache clearing (fee rates TTL)
 
@@ -298,8 +298,8 @@ class TradingBot:
             if self._balance_mgr:
                 try:
                     self._balance_mgr.update_wallet(cash, pos_val)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("[GARVES] Balance manager update failed: %s", str(e)[:100])
         except Exception as e:
             log.debug("Balance sync failed: %s", str(e)[:100])
 
@@ -414,8 +414,8 @@ class TradingBot:
                 try:
                     regime = detect_regime()
                     regime_label = regime.label
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("[GARVES] Regime detection failed: %s", str(e)[:100])
 
                 self.maker_engine.tick(_maker_markets, regime_label)
 
@@ -505,8 +505,8 @@ class TradingBot:
                 if hasattr(self.client, '_fee_rates'):
                     self.client._fee_rates.clear()
                     log.info("[SDK] Cleared fee rate cache (tick %d)", self._tick_counter)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("[GARVES] Fee rate cache clear failed: %s", str(e)[:100])
 
         # Check mode toggle from dashboard
         self._check_mode_toggle()
@@ -891,8 +891,8 @@ class TradingBot:
                                         _brain_reasons.append(f"llm_think({_llm_adj:+.3f},{_think_elapsed:.1f}s)")
                                 except (ValueError, TypeError):
                                     pass
-                        except Exception:
-                            pass  # LLM never blocks trading
+                        except Exception as e:
+                            log.warning("[GARVES] LLM think failed: %s", str(e)[:100])
 
                     # 4. Apply adjustment (capped at +/- 0.10 with LLM, was 0.05)
                     if _brain_adj != 0.0:
@@ -984,8 +984,8 @@ class TradingBot:
                                      _ta_score, _old_size, conviction.position_size_usd)
                         else:
                             log.info("  -> Snipe Assist: AUTO-EXECUTE (score=%.0f)", _ta_score)
-            except Exception:
-                pass  # Timing assist is advisory — never block trades on errors
+            except Exception as e:
+                log.warning("[GARVES] Timing assist failed: %s", str(e)[:100])
 
             # Risk check (pass actual conviction size, not default $10)
             allowed, reason = check_risk(self.cfg, sig, self.tracker, market_id,
@@ -1056,8 +1056,8 @@ class TradingBot:
                         },
                         summary=f"{sig.direction.upper()} {asset.upper()}/{timeframe} ${conviction.position_size_usd:.2f} (edge={sig.edge*100:.1f}%)",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("[GARVES] Event publish failed: %s", str(e)[:100])
 
                 # Brain: record trade decision
                 if self._brain:
@@ -1068,8 +1068,8 @@ class TradingBot:
                         _did = self._brain.remember_decision(_ctx, _dec, reasoning=_reason, confidence=sig.confidence, tags=[asset, timeframe, regime.label])
                         # Store decision_id on the trade for outcome tracking
                         self.perf_tracker.set_decision_id(f"{market_id[:12]}_{int(time.time())}", _did)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("[GARVES] Brain record decision failed: %s", str(e)[:100])
 
                 # Telegram alert for live trades
                 if not self.cfg.dry_run:
@@ -1107,8 +1107,8 @@ class TradingBot:
                             )
                         msg += f"\n\n\U0001f194 `{order_id}`"
                         _send_telegram(msg)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("[GARVES] Telegram trade alert failed: %s", str(e)[:100])
 
                 # Track for performance measurement
                 self.perf_tracker.record_signal(
@@ -1134,8 +1134,8 @@ class TradingBot:
         if self._balance_mgr:
             try:
                 self._balance_mgr.report_exposure(self.tracker.total_exposure)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("[GARVES] Balance exposure report failed: %s", str(e)[:100])
 
         # ── Straddle Engine: if no directional trades and regime is fear ──
         if trades_this_tick == 0 and regime.label in ("extreme_fear", "fear"):
@@ -1209,8 +1209,8 @@ class TradingBot:
                     if cr["claimed"] > 0:
                         log.info("[CLAIM-%s] Redeemed %d positions for $%.2f USDC",
                                  _name, cr["claimed"], cr["usdc"])
-        except Exception:
-            pass  # Never block trading
+        except Exception as e:
+            log.warning("[GARVES] Auto-claim failed: %s", str(e)[:100])
 
         # ── Trade Journal Analysis: every 10 resolved trades, LLM analyzes patterns ──
         if self._trade_journal_counter >= 10 and self._brain and self._shared_llm_call:
@@ -1258,8 +1258,8 @@ class TradingBot:
                     "regime": regime.label if regime else "unknown",
                     "dry_run": self.cfg.dry_run,
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("[GARVES] Hub heartbeat failed: %s", str(e)[:100])
 
         # Signal cycle status for dashboard badge timer
         try:
@@ -1269,8 +1269,8 @@ class TradingBot:
             if _cycle_file.exists():
                 try:
                     _prev_count = _json.loads(_cycle_file.read_text()).get("cycle_count", 0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("[GARVES] Failed to read cycle status: %s", str(e)[:100])
             _cycle_file.write_text(_json.dumps({
                 "last_eval_at": time.time(),
                 "tick_interval_s": self.cfg.tick_interval_s,
@@ -1279,8 +1279,8 @@ class TradingBot:
                 "regime": regime.label if regime else "unknown",
                 "cycle_count": _prev_count + 1,
             }))
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("[GARVES] Failed to write cycle status: %s", str(e)[:100])
 
     def _save_derivatives_state(self, deriv_data: dict | None) -> None:
         """Persist derivatives + depth state to disk for dashboard access."""
@@ -1301,8 +1301,8 @@ class TradingBot:
                 depth_file = data_dir / "spot_depth.json"
                 with open(depth_file, "w") as f:
                     _json.dump(depth, f)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("[GARVES] Failed to save derivatives state: %s", str(e)[:100])
 
     def _save_external_data_state(self, ext_cache: dict, macro_ctx) -> None:
         """Persist external data state to disk for dashboard access."""
@@ -1362,8 +1362,8 @@ class TradingBot:
             state_file = data_dir / "external_data_state.json"
             with open(state_file, "w") as f:
                 _json.dump(state, f)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("[GARVES] Failed to save external data state: %s", str(e)[:100])
 
     async def _cleanup(self) -> None:
         log.info("Shutting down...")

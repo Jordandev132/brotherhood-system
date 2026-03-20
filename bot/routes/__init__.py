@@ -21,11 +21,9 @@ def register_all_blueprints(app: Flask) -> None:
     from bot.routes.thor import thor_bp
     from bot.routes.brain import brain_bp
     from bot.routes.system import system_bp
-    from bot.routes.hawk import hawk_bp
     from bot.routes.viper import viper_bp
     from bot.routes.quant import quant_bp
     from bot.routes.llm import llm_bp
-    from bot.routes.odin import odin_bp
     from bot.routes.oracle import oracle_bp
     from bot.routes.discord_intel import discord_bp
     from bot.routes.pnl import pnl_bp
@@ -47,11 +45,9 @@ def register_all_blueprints(app: Flask) -> None:
     app.register_blueprint(thor_bp)
     app.register_blueprint(brain_bp)
     app.register_blueprint(system_bp)
-    app.register_blueprint(hawk_bp)
     app.register_blueprint(viper_bp)
     app.register_blueprint(quant_bp)
     app.register_blueprint(llm_bp)
-    app.register_blueprint(odin_bp)
     app.register_blueprint(oracle_bp)
     app.register_blueprint(discord_bp)
     app.register_blueprint(pnl_bp)

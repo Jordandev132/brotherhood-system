@@ -27,9 +27,6 @@ GARVES_STATIC_FILES = [
     DATA_DIR / "trades_old_strategy_feb15.jsonl",
     DATA_DIR / "trades_pre_fix_20260214_2359.jsonl",
 ]
-HAWK_TRADES = DATA_DIR / "hawk_trades.jsonl"
-ODIN_DATA = Path.home() / "odin" / "data"
-ODIN_TRADES = ODIN_DATA / "odin_trades.jsonl"
 LLM_COSTS_FILE = Path.home() / "shared" / "llm_costs.jsonl"
 
 
@@ -79,15 +76,8 @@ def _load_garves_trades() -> list[dict]:
     return all_trades
 
 
-def _load_hawk_trades() -> list[dict]:
-    """Load resolved Hawk trades."""
-    trades = read_fresh_jsonl(HAWK_TRADES, "~/polymarket-bot/data/hawk_trades.jsonl")
-    return [t for t in trades if t.get("resolved")]
-
-
-def _load_odin_trades() -> list[dict]:
-    """Load Odin paper/live trades."""
-    return read_fresh_jsonl(ODIN_TRADES, "~/odin/data/odin_trades.jsonl")
+# _load_hawk_trades removed — Hawk KILLED Mar 3 2026
+# _load_odin_trades removed — Odin KILLED Mar 14 2026
 
 
 def _compute_agent_pnl(trades: list[dict], agent: str) -> dict:
@@ -187,7 +177,6 @@ def _load_llm_costs() -> dict:
 def api_pnl_indicators():
     """Indicator audit reports — CI data for all Garves and Hawk indicators."""
     garves_report = {}
-    hawk_report = {}
 
     try:
         from bot.weight_learner import generate_audit_report
@@ -195,15 +184,8 @@ def api_pnl_indicators():
     except Exception as e:
         garves_report = {"error": str(e)}
 
-    try:
-        from hawk.learner import generate_audit_report as hawk_audit
-        hawk_report = hawk_audit()
-    except Exception as e:
-        hawk_report = {"error": str(e)}
-
     return jsonify({
         "garves": garves_report,
-        "hawk": hawk_report,
         "timestamp": time.time(),
     })
 
@@ -212,8 +194,6 @@ def api_pnl_indicators():
 def api_pnl():
     """Unified P&L across all trading agents."""
     garves = _compute_agent_pnl(_load_garves_trades(), "garves")
-    hawk = _compute_agent_pnl(_load_hawk_trades(), "hawk")
-    odin = _compute_agent_pnl(_load_odin_trades(), "odin")
 
     # Slippage report (Garves only — P1-1)
     slippage = {"raw_pnl": 0, "adjusted_pnl": 0, "slippage_cost": 0}
@@ -231,19 +211,19 @@ def api_pnl():
 
     costs = _load_llm_costs()
 
-    # Combined daily P&L
+    # Combined daily P&L (Garves only — hawk/odin KILLED)
     combined_daily: dict[str, float] = defaultdict(float)
-    for agent_data in [garves, hawk, odin]:
+    for agent_data in [garves]:
         for day, pnl in agent_data["daily_pnl"].items():
             combined_daily[day] += pnl
     combined_daily_sorted = {k: round(v, 2) for k, v in sorted(combined_daily.items())}
 
-    total_pnl = garves["total_pnl"] + hawk["total_pnl"] + odin["total_pnl"]
-    total_trades = garves["total_trades"] + hawk["total_trades"] + odin["total_trades"]
-    total_wins = garves["wins"] + hawk["wins"] + odin["wins"]
+    total_pnl = garves["total_pnl"]
+    total_trades = garves["total_trades"]
+    total_wins = garves["wins"]
 
     return jsonify({
-        "agents": {"garves": garves, "hawk": hawk, "odin": odin},
+        "agents": {"garves": garves},
         "combined": {
             "total_pnl": round(total_pnl, 2),
             "total_trades": total_trades,
